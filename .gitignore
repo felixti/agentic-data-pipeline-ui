@@ -1,0 +1,9 @@
+node_modules
+.env
+.env.local
+.env*.local
+.ssh
+.next
+.DS_Store
+tsconfig.tsbuildinfo
+stitch_assets

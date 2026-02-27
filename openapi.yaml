@@ -1,0 +1,404 @@
+openapi: 3.1.0
+info:
+  title: Content Detection API
+  version: 1.0.0
+  description: |
+    API for detecting content type of PDF documents.
+    
+    Automatically classifies PDFs as:
+    - **text_based**: Documents with extractable text layers
+    - **scanned**: Image-based documents requiring OCR
+    - **mixed**: Documents with both text and significant image content
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local development
+
+paths:
+  /detect:
+    post:
+      operationId: detectContent
+      summary: Detect content type of uploaded PDF
+      description: Upload a PDF file and detect whether it's text-based, scanned, or mixed content.
+      tags:
+        - Content Detection
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF file to analyze
+                detailed:
+                  type: boolean
+                  default: false
+                  description: Include detailed per-page analysis
+      responses:
+        '200':
+          description: Successful detection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionResponse'
+        '400':
+          description: Invalid file or request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /detect/url:
+    post:
+      operationId: detectContentFromUrl
+      summary: Detect content type from URL
+      description: Download a PDF from URL and detect its content type.
+      tags:
+        - Content Detection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectionUrlRequest'
+      responses:
+        '200':
+          description: Successful detection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionResponse'
+        '400':
+          description: Invalid URL or request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /detect/batch:
+    post:
+      operationId: detectContentBatch
+      summary: Batch content detection
+      description: Detect content type for multiple PDF files (max 10).
+      tags:
+        - Content Detection
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: PDF files to analyze (max 10)
+                detailed:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Successful batch detection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchDetectionResponse'
+        '400':
+          description: Invalid files or request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /jobs/{jobId}/parser-selection:
+    get:
+      operationId: getParserSelection
+      summary: Get parser selection for a job
+      description: Retrieve parser selection based on content detection result.
+      tags:
+        - Pipeline
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Parser selection details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParserSelectionResponse'
+
+components:
+  schemas:
+    DetectionRequest:
+      type: object
+      properties:
+        detailed:
+          type: boolean
+          default: false
+
+    DetectionUrlRequest:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          format: uri
+          example: https://example.com/document.pdf
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        detailed:
+          type: boolean
+          default: false
+
+    DetectionResponse:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: '#/components/schemas/DetectionResult'
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    DetectionResult:
+      type: object
+      required:
+        - content_type
+        - confidence
+        - recommended_parser
+        - text_statistics
+        - image_statistics
+        - processing_time_ms
+        - file_hash
+        - file_size
+      properties:
+        content_type:
+          type: string
+          enum: [text_based, scanned, mixed]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        recommended_parser:
+          type: string
+        alternative_parsers:
+          type: array
+          items:
+            type: string
+        text_statistics:
+          $ref: '#/components/schemas/TextStatistics'
+        image_statistics:
+          $ref: '#/components/schemas/ImageStatistics'
+        page_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PageResult'
+        processing_time_ms:
+          type: integer
+        file_hash:
+          type: string
+        file_size:
+          type: integer
+
+    TextStatistics:
+      type: object
+      properties:
+        total_pages:
+          type: integer
+        total_characters:
+          type: integer
+        has_text_layer:
+          type: boolean
+        font_count:
+          type: integer
+        encoding:
+          type: string
+          nullable: true
+        average_chars_per_page:
+          type: number
+
+    ImageStatistics:
+      type: object
+      properties:
+        total_images:
+          type: integer
+        image_area_ratio:
+          type: number
+        average_dpi:
+          type: integer
+          nullable: true
+        color_pages:
+          type: integer
+
+    PageResult:
+      type: object
+      properties:
+        page_number:
+          type: integer
+        content_type:
+          type: string
+          enum: [text_based, scanned, mixed]
+        confidence:
+          type: number
+        text_ratio:
+          type: number
+        image_ratio:
+          type: number
+        character_count:
+          type: integer
+        image_count:
+          type: integer
+
+    BatchDetectionResponse:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/BatchDetectionItem'
+            summary:
+              type: object
+              properties:
+                total:
+                  type: integer
+                successful:
+                  type: integer
+                errors:
+                  type: integer
+                text_based:
+                  type: integer
+                scanned:
+                  type: integer
+                mixed:
+                  type: integer
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    BatchDetectionItem:
+      type: object
+      properties:
+        filename:
+          type: string
+        content_type:
+          type: string
+        confidence:
+          type: number
+        recommended_parser:
+          type: string
+        processing_time_ms:
+          type: integer
+        error:
+          type: string
+          nullable: true
+
+    ParserSelectionResponse:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: object
+          properties:
+            job_id:
+              type: string
+            detection_result:
+              type: object
+            selection:
+              type: object
+              properties:
+                primary_parser:
+                  type: string
+                fallback_parser:
+                  type: string
+                  nullable: true
+                rationale:
+                  type: string
+                overridden:
+                  type: boolean
+            estimated_processing_time:
+              type: string
+            estimated_cost:
+              type: number
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    ResponseMeta:
+      type: object
+      required:
+        - request_id
+        - timestamp
+        - api_version
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        api_version:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - meta
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
