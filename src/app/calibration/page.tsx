@@ -1007,7 +1007,7 @@ export default function Calibration() {
 								)}
 							{(activeTab === "cognee" || activeTab === "hippo") && (
 								<>
-									<div className="flex-1 flex items-center justify-center bg-white border-r border-ink">
+									<div className="flex-1 flex flex-col p-6 min-w-0 overflow-hidden bg-white border-r border-ink">
 										{activeTab === "cognee" ? (
 											<GraphNetworkViewer
 												isLoading={cogneeMutation.isPending}

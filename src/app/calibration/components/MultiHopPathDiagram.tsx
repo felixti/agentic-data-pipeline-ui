@@ -68,8 +68,8 @@ export default function MultiHopPathDiagram({
 									</div>
 
 									{/* Node Box */}
-									<div className="ml-4 pl-4 border-l-2 border-ink pb-2">
-										<div className="inline-block bg-white border-2 border-ink px-3 py-1.5 shadow-[2px_2px_0px_#000] relative group hover:-translate-y-0.5 transition-transform">
+									<div className="ml-4 pl-4 border-l-2 border-ink pb-2 pr-4">
+										<div className="inline-block bg-white border-2 border-ink px-3 py-1.5 shadow-[2px_2px_0px_#000] relative group hover:-translate-y-0.5 transition-transform max-w-full text-left break-all">
 											<span className="font-bold text-xs uppercase tracking-tight relative z-10">
 												{entity}
 											</span>
