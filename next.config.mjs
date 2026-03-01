@@ -2,7 +2,7 @@
 const nextConfig = {
 	output: "standalone",
 	experimental: {
-		proxyClientMaxBodySize: "30mb",
+		proxyClientMaxBodySize: "100mb",
 	},
 	async rewrites() {
 		const apiUrl =

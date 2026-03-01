@@ -300,6 +300,7 @@ export function useUploadFiles() {
 			const formData = new FormData();
 			for (const file of params.files) {
 				formData.append("files", file);
+				formData.append("file", file); // Add singular 'file' to match the HippoRAG cURL spec
 			}
 			if (params.priority) {
 				formData.append("priority", params.priority);
@@ -308,6 +309,13 @@ export function useUploadFiles() {
 				formData.append("pipeline_id", params.pipeline_id);
 			}
 			if (params.destinations?.length) {
+				// The backend expects flat destination_type & dataset_id for HippoRAG specifically
+				const hipporagDest = params.destinations.find((d) => d.type === "hipporag");
+				if (hipporagDest) {
+					formData.append("destination_type", "hipporag");
+					formData.append("dataset_id", hipporagDest.config.dataset_id || "default");
+				}
+				// Always append the full JSON array to support Cognee and hybrid scenarios
 				formData.append("destinations", JSON.stringify(params.destinations));
 			}
 			if (params.metadata) {
