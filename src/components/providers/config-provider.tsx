@@ -30,7 +30,9 @@ export const ConfigProvider: React.FC<{ children: React.ReactNode }> = ({
 		const storedKey = localStorage.getItem("ag_api_key");
 		if (storedKey) setApiKeyValue(storedKey);
 
-		const storedStrategy = localStorage.getItem("ag_strategy") as ChunkingStrategy;
+		const storedStrategy = localStorage.getItem(
+			"ag_strategy",
+		) as ChunkingStrategy;
 		if (storedStrategy) setStrategyValue(storedStrategy);
 
 		const storedChunkSize = localStorage.getItem("ag_chunk_size");

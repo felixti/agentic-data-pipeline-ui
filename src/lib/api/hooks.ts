@@ -1,7 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./client";
 import type { components } from "./schema";
-import { hybridSearch, ragQuery, semanticTextSearch, textSearch } from "./search";
+import {
+	cogneeSearch,
+	hipporagQA,
+	hipporagRetrieve,
+	hybridSearch,
+	ragQuery,
+	semanticTextSearch,
+	textSearch,
+} from "./search";
 
 export type ComprehensiveHealthResponse =
 	components["schemas"]["ComprehensiveHealthResponse"];
@@ -23,9 +31,14 @@ export function useJobs(params?: {
 			});
 			if (error) {
 				const errObj = error as Record<string, unknown>;
-				const status = (errObj?.status ?? errObj?.statusCode) as number | undefined;
-				const detail = errObj?.detail?.toString() ?? errObj?.message?.toString();
-				const prefix = status ? `Server error (${status})` : "Failed to fetch jobs";
+				const status = (errObj?.status ?? errObj?.statusCode) as
+					| number
+					| undefined;
+				const detail =
+					errObj?.detail?.toString() ?? errObj?.message?.toString();
+				const prefix = status
+					? `Server error (${status})`
+					: "Failed to fetch jobs";
 				throw new Error(detail || prefix);
 			}
 			// API returns envelope: { data: { items, total, page, page_size }, meta, links }
@@ -45,13 +58,13 @@ export function useJobs(params?: {
 				}>,
 				total: (inner.total ?? 0) as number,
 				page: (inner.page ?? 1) as number,
-				limit: ((inner.page_size ?? inner.limit ?? 20) as number),
+				limit: (inner.page_size ?? inner.limit ?? 20) as number,
 			};
 		},
 		refetchInterval: (query) => {
 			const items = query.state.data?.items;
-			const hasActive = items?.some(
-				(j) => ["created", "pending", "queued", "processing"].includes(j.status),
+			const hasActive = items?.some((j) =>
+				["created", "pending", "queued", "processing"].includes(j.status),
 			);
 			return hasActive ? 3_000 : 30_000;
 		},
@@ -130,7 +143,45 @@ export function useRagQuery() {
 	return useMutation({ mutationFn: ragQuery });
 }
 
+export function useCogneeSearch() {
+	return useMutation({ mutationFn: cogneeSearch });
+}
+
+export function useHipporagRetrieve() {
+	return useMutation({ mutationFn: hipporagRetrieve });
+}
+
+export function useHipporagQA() {
+	return useMutation({ mutationFn: hipporagQA });
+}
+
 /* ── Job Creation Mutations ──────────────────────────── */
+
+export interface CogneeConfig {
+	dataset_id?: string;
+	graph_name?: string;
+	auto_cognify?: boolean;
+	extract_entities?: boolean;
+	extract_relationships?: boolean;
+}
+
+export interface HippoRAGConfig {
+	dataset_id?: string;
+}
+
+export type JobDestination =
+	| {
+		type: "cognee_local";
+		config: CogneeConfig;
+		filters?: Record<string, unknown>;
+		enabled?: boolean;
+	}
+	| {
+		type: "hipporag";
+		config: HippoRAGConfig;
+		filters?: Record<string, unknown>;
+		enabled?: boolean;
+	};
 
 export interface CreateJobRequest {
 	source_type: "upload" | "url" | "s3" | "azure_blob" | "sharepoint";
@@ -142,7 +193,7 @@ export interface CreateJobRequest {
 	mode?: "sync" | "async";
 	external_id?: string;
 	pipeline_id?: string;
-	destination_ids?: string[];
+	destinations?: JobDestination[];
 	metadata?: Record<string, unknown>;
 }
 
@@ -177,6 +228,7 @@ export function useCreateJob() {
 	const qc = useQueryClient();
 	return useMutation({
 		mutationFn: async (body: CreateJobRequest) => {
+			console.log("[useCreateJob] Sending payload:", body);
 			const { data, error } = await apiClient.POST("/api/v1/jobs", {
 				body: body as any,
 			});
@@ -208,7 +260,7 @@ export interface UploadFilesRequest {
 	files: File[];
 	priority?: "low" | "normal" | "high";
 	pipeline_id?: string;
-	destination_ids?: string[];
+	destinations?: JobDestination[];
 	metadata?: Record<string, unknown>;
 }
 
@@ -240,75 +292,110 @@ export function useUploadFiles() {
 		mutationFn: async (
 			params: UploadFilesRequest,
 		): Promise<UploadFilesResponse> => {
-			const formData = new FormData();
+			const apiKey =
+				typeof window !== "undefined"
+					? (localStorage.getItem("ag_api_key") ?? "")
+					: "";
 
-			// Append each file with proper metadata
+			const formData = new FormData();
 			for (const file of params.files) {
 				formData.append("files", file);
 			}
-
-			// Add optional parameters
 			if (params.priority) {
 				formData.append("priority", params.priority);
 			}
 			if (params.pipeline_id) {
 				formData.append("pipeline_id", params.pipeline_id);
 			}
-			if (params.destination_ids?.length) {
-				formData.append(
-					"destination_ids",
-					JSON.stringify(params.destination_ids),
-				);
+			if (params.destinations?.length) {
+				formData.append("destinations", JSON.stringify(params.destinations));
 			}
 			if (params.metadata) {
 				formData.append("metadata", JSON.stringify(params.metadata));
 			}
 
-			const apiKey =
-				typeof window !== "undefined"
-					? (localStorage.getItem("ag_api_key") ?? "")
-					: "";
+			console.log("[useUploadFiles] Uploading files:", params.files.map(f => f.name));
 
-			const res = await fetch("/proxy/api/v1/upload", {
+			const uploadRes = await fetch("/proxy/api/v1/upload", {
 				method: "POST",
-				headers: {
-					"X-API-Key": apiKey,
-					// Note: Do NOT set Content-Type for FormData - browser sets it with boundary
-				},
+				headers: { "X-API-Key": apiKey },
 				body: formData,
 			});
 
-			if (!res.ok) {
-				let errorMessage = `Upload failed (${res.status})`;
+			if (!uploadRes.ok) {
+				let errorMessage = `Upload failed (${uploadRes.status})`;
 				try {
-					const err = await res.json();
-					// Handle different error response structures
-					if (err.error?.message) {
-						errorMessage = err.error.message;
-					} else if (err.detail?.error?.message) {
-						errorMessage = err.detail.error.message;
-					} else if (err.detail?.message) {
-						errorMessage = err.detail.message;
-					} else if (typeof err.detail === "string") {
-						errorMessage = err.detail;
-					} else if (err.message) {
-						errorMessage = err.message;
-					}
+					const err = await uploadRes.json();
+					errorMessage =
+						err.error?.message ??
+						err.detail?.error?.message ??
+						err.detail?.message ??
+						(typeof err.detail === "string" ? err.detail : null) ??
+						err.message ??
+						errorMessage;
 				} catch {
-					// If JSON parsing fails, use status text
-					errorMessage = `Upload failed: ${res.statusText || res.status}`;
+					errorMessage = `Upload failed: ${uploadRes.statusText || uploadRes.status}`;
 				}
 				throw new Error(errorMessage);
 			}
 
-			const data = await res.json();
-			return data as UploadFilesResponse;
+			// Note: the backend `/upload` endpoint returns dynamic structures depending on counts.
+			// Single file: { data: { message, job_id, file_name, file_size } }
+			// Multi files: { data: { message, job_ids: [], files: [] } }
+			// We MUST normalize this into the UI's expected format `data.jobs = [{...}]`.
+			const rawData = await uploadRes.json();
+			console.log("[useUploadFiles] Response:", rawData);
+
+			const uploadedItems: Array<{
+				id: string;
+				source_uri: string;
+				file_name: string;
+				mime_type?: string;
+				file_size?: number;
+			}> = [];
+
+			if (rawData?.data?.job_ids && rawData?.data?.files) {
+				// Multiple files format
+				rawData.data.files.forEach((fileName: string, idx: number) => {
+					uploadedItems.push({
+						id: rawData.data.job_ids[idx] || "unknown",
+						source_uri: fileName,
+						file_name: fileName,
+					});
+				});
+			} else if (rawData?.data?.job_id && rawData?.data?.file_name) {
+				// Single file format
+				uploadedItems.push({
+					id: rawData.data.job_id,
+					source_uri: rawData.data.file_name,
+					file_name: rawData.data.file_name,
+					file_size: rawData.data.file_size,
+				});
+			}
+
+			// Return normalized array matching the UI's expected UploadFilesResponse
+			return {
+				data: {
+					jobs: uploadedItems.map((item) => ({
+						id: item.id,
+						status: "created",
+						source_type: "upload",
+						source_uri: item.source_uri,
+						file_name: item.file_name,
+						file_size: item.file_size,
+						mime_type: item.mime_type ?? null,
+						priority: params.priority === "high" ? 1 : params.priority === "low" ? -1 : 0,
+						created_at: new Date().toISOString(),
+					})),
+					total: uploadedItems.length
+				},
+				meta: rawData?.meta || { request_id: "", timestamp: new Date().toISOString(), api_version: "1" },
+			} as UploadFilesResponse;
 		},
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["jobs"] });
 		},
 		retry: (failureCount, error) => {
-			// Retry on network errors or 5xx server errors
 			if (error instanceof Error) {
 				const msg = error.message.toLowerCase();
 				if (
@@ -333,7 +420,7 @@ export interface IngestUrlRequest {
 	external_id?: string;
 	headers?: Record<string, string>;
 	pipeline_id?: string;
-	destination_ids?: string[];
+	destinations?: JobDestination[];
 	metadata?: Record<string, unknown>;
 }
 
@@ -346,13 +433,51 @@ export function useIngestUrl() {
 					? (localStorage.getItem("ag_api_key") ?? "")
 					: "";
 
-			const res = await fetch("/proxy/api/v1/upload/url", {
+			// When destinations are present, route through POST /api/v1/jobs
+			// which natively supports the destinations JSON array per the PRD.
+			// Otherwise use the dedicated URL upload endpoint.
+			const endpoint = body.destinations?.length
+				? "/proxy/api/v1/jobs"
+				: "/proxy/api/v1/upload/url";
+
+			const jobBody: Record<string, unknown> = {
+				url: body.url,
+				filename: body.filename,
+				priority: body.priority,
+				mode: body.mode ?? "async",
+				external_id: body.external_id,
+				headers: body.headers,
+				pipeline_id: body.pipeline_id,
+				metadata: body.metadata,
+			};
+
+			if (body.destinations?.length) {
+				// Map to POST /api/v1/jobs shape
+				Object.assign(jobBody, {
+					source_type: "url",
+					source_uri: body.url,
+					file_name: body.filename,
+					destinations: body.destinations,
+				});
+				delete jobBody.url;
+				delete jobBody.filename;
+				delete jobBody.headers;
+			}
+
+			// Remove undefined keys
+			Object.keys(jobBody).forEach((k) => {
+				if (jobBody[k] === undefined) delete jobBody[k];
+			});
+
+			console.log(`[useIngestUrl] Sending to ${endpoint}:`, jobBody);
+
+			const res = await fetch(endpoint, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 					"X-API-Key": apiKey,
 				},
-				body: JSON.stringify(body),
+				body: JSON.stringify(jobBody),
 			});
 
 			if (!res.ok) {

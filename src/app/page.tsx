@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import NewJobPanel from "@/components/NewJobPanel";
 import DeleteConfirmModal from "@/components/DeleteConfirmModal";
+import NewJobPanel from "@/components/NewJobPanel";
 import {
-	useHealth,
-	useJobs,
+	useBulkDeleteJobs,
 	useCancelJob,
 	useDeleteJobHard,
-	useBulkDeleteJobs,
+	useHealth,
+	useJobs,
 } from "@/lib/api/hooks";
 
 type DeleteTarget = {
@@ -37,7 +37,9 @@ export default function Monitor() {
 	const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 	const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
-	const [singleDeleteError, setSingleDeleteError] = useState<string | null>(null);
+	const [singleDeleteError, setSingleDeleteError] = useState<string | null>(
+		null,
+	);
 
 	const handleCopy = (id: string, e: React.SyntheticEvent) => {
 		e.stopPropagation();
@@ -48,7 +50,8 @@ export default function Monitor() {
 
 	/* ── Selection helpers ─────────────────────────────── */
 	const allIds = jobsData?.items?.map((j) => j.id) ?? [];
-	const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+	const allSelected =
+		allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
 	const someSelected = selectedIds.size > 0;
 
 	const toggleAll = () => {
@@ -100,8 +103,7 @@ export default function Monitor() {
 		}
 	};
 
-	const isDeletePending =
-		cancelJob.isPending || deleteHard.isPending;
+	const isDeletePending = cancelJob.isPending || deleteHard.isPending;
 
 	/* ── Health ─────────────────────────────────────────── */
 	const components = healthData?.components ?? {};
@@ -267,7 +269,9 @@ export default function Monitor() {
 								<th className="px-6 py-3 border-r border-ink w-64">Job ID</th>
 								<th className="px-6 py-3 border-r border-ink w-48">Source</th>
 								<th className="px-6 py-3 border-r border-ink w-48">Status</th>
-								<th className="px-6 py-3 border-r border-ink w-48">File Name</th>
+								<th className="px-6 py-3 border-r border-ink w-48">
+									File Name
+								</th>
 								<th className="px-6 py-3 border-r border-ink w-48">Created</th>
 								<th className="px-6 py-3 w-36 text-center">Actions</th>
 							</tr>
@@ -310,7 +314,9 @@ export default function Monitor() {
 									<tr
 										key={job.id}
 										className={`group hover:bg-surface cursor-crosshair-custom transition-all duration-200 h-12 relative hover:z-10 hover:shadow-[0_4px_0px_#000] hover:-translate-y-0.5 border-b border-transparent hover:border-ink ${
-											job.status === "failed" ? "bg-surface hover:bg-red-50" : ""
+											job.status === "failed"
+												? "bg-surface hover:bg-red-50"
+												: ""
 										} ${isSelected ? "bg-surface/60" : ""}`}
 									>
 										{/* Checkbox */}
@@ -469,7 +475,10 @@ export default function Monitor() {
 			{/* Single-job confirmation modal */}
 			<DeleteConfirmModal
 				isOpen={!!deleteTarget}
-				onClose={() => { setDeleteTarget(null); setSingleDeleteError(null); }}
+				onClose={() => {
+					setDeleteTarget(null);
+					setSingleDeleteError(null);
+				}}
 				onConfirm={handleConfirmDelete}
 				isPending={isDeletePending}
 				variant={deleteTarget?.mode === "hard" ? "danger" : "warning"}
@@ -484,13 +493,18 @@ export default function Monitor() {
 						? `Job ${deleteTarget?.id.substring(0, 8)}… ${deleteTarget?.fileName ? `(${deleteTarget.fileName})` : ""} and ALL associated chunks will be permanently removed from the system.`
 						: `Job ${deleteTarget?.id.substring(0, 8)}… will be cancelled. The job record will remain but processing will stop. You can retry a cancelled job later.`
 				}
-				confirmLabel={deleteTarget?.mode === "hard" ? "DELETE FOREVER" : "YES, CANCEL"}
+				confirmLabel={
+					deleteTarget?.mode === "hard" ? "DELETE FOREVER" : "YES, CANCEL"
+				}
 			/>
 
 			{/* Bulk delete confirmation modal */}
 			<DeleteConfirmModal
 				isOpen={bulkDeleteOpen}
-				onClose={() => { setBulkDeleteOpen(false); setBulkDeleteError(null); }}
+				onClose={() => {
+					setBulkDeleteOpen(false);
+					setBulkDeleteError(null);
+				}}
 				onConfirm={handleConfirmBulkDelete}
 				isPending={bulkDelete.isPending}
 				variant="danger"

@@ -64,6 +64,73 @@ export interface RAGQueryResponse {
 	};
 }
 
+/* ── Cognee Types ────────────────────────────────────────── */
+
+export interface CogneeSearchRequest {
+	query: string;
+	search_type?: "vector" | "graph" | "hybrid";
+	top_k?: number;
+	dataset_id?: string;
+}
+
+export interface CogneeSearchResult {
+	chunk_id: string;
+	content: string;
+	score: number;
+	source_document: string;
+	entities: string[];
+}
+
+export interface CogneeSearchResponse {
+	results: CogneeSearchResult[];
+	search_type: string;
+	dataset_id: string;
+	query_time_ms: number;
+}
+
+/* ── HippoRAG Types ──────────────────────────────────────── */
+
+export interface HippoRAGRetrieveRequest {
+	queries: string[];
+	dataset_id?: string;
+	num_to_retrieve?: number;
+	include_metadata?: boolean;
+}
+
+export interface HippoRAGRetrievalResult {
+	query: string;
+	passages: string[];
+	scores: number[];
+	source_documents: string[];
+	entities: string[];
+}
+
+export interface HippoRAGRetrieveResponse {
+	results: HippoRAGRetrievalResult[];
+	query_time_ms: number;
+}
+
+export interface HippoRAGQARequest {
+	queries: string[];
+	dataset_id?: string;
+	num_to_retrieve?: number;
+	generate_answer?: boolean;
+}
+
+export interface HippoRAGQAResult {
+	query: string;
+	answer: string;
+	sources: string[];
+	confidence: number;
+	retrieval_results: HippoRAGRetrievalResult;
+}
+
+export interface HippoRAGQAResponse {
+	results: HippoRAGQAResult[];
+	total_tokens: number;
+	query_time_ms: number;
+}
+
 /* ── Helper for authenticated fetch calls ─────────────── */
 
 function getApiKey(): string {
@@ -104,7 +171,7 @@ export async function hybridSearch(params: HybridSearchRequest) {
 		body: params,
 	});
 	if (error) {
-		const detail = (error as any)?.detail;
+		const detail = (error as { detail?: unknown })?.detail;
 		const msg = Array.isArray(detail) ? detail[0]?.msg : detail;
 		throw new Error(msg || "Failed to execute hybrid search");
 	}
@@ -116,7 +183,7 @@ export async function semanticSearch(params: SemanticSearchRequest) {
 		body: params,
 	});
 	if (error) {
-		const detail = (error as any)?.detail;
+		const detail = (error as { detail?: unknown })?.detail;
 		const msg = Array.isArray(detail) ? detail[0]?.msg : detail;
 		throw new Error(msg || "Failed to execute semantic search");
 	}
@@ -137,7 +204,7 @@ export async function textSearch(params: TextSearchRequest) {
 		body: params,
 	});
 	if (error) {
-		const detail = (error as any)?.detail;
+		const detail = (error as { detail?: unknown })?.detail;
 		const msg = Array.isArray(detail) ? detail[0]?.msg : detail;
 		throw new Error(msg || "Failed to execute text search");
 	}
@@ -148,6 +215,27 @@ export async function ragQuery(
 	params: RAGQueryRequest,
 ): Promise<RAGQueryResponse> {
 	return apiFetch<RAGQueryResponse>("/api/v1/rag/query", params);
+}
+
+export async function cogneeSearch(
+	params: CogneeSearchRequest,
+): Promise<CogneeSearchResponse> {
+	return apiFetch<CogneeSearchResponse>("/api/v1/cognee/search", params);
+}
+
+export async function hipporagRetrieve(
+	params: HippoRAGRetrieveRequest,
+): Promise<HippoRAGRetrieveResponse> {
+	return apiFetch<HippoRAGRetrieveResponse>(
+		"/api/v1/hipporag/retrieve",
+		params,
+	);
+}
+
+export async function hipporagQA(
+	params: HippoRAGQARequest,
+): Promise<HippoRAGQAResponse> {
+	return apiFetch<HippoRAGQAResponse>("/api/v1/hipporag/qa", params);
 }
 
 export async function findSimilarChunks(
@@ -164,7 +252,7 @@ export async function findSimilarChunks(
 		},
 	);
 	if (error) {
-		const detail = (error as any)?.detail;
+		const detail = (error as { detail?: unknown })?.detail;
 		const msg = Array.isArray(detail) ? detail[0]?.msg : detail;
 		throw new Error(msg || "Failed to find similar chunks");
 	}

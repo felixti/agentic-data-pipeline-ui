@@ -1,7 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useConfig } from "@/components/providers/config-provider";
-import { useState, useEffect } from "react";
 
 export default function PipelineConfig() {
 	const {
@@ -37,9 +37,9 @@ export default function PipelineConfig() {
 
 	const visualTotal = Math.max(chunkSize * 2.5, 1);
 	const chunkWidthPct = (chunkSize / visualTotal) * 100;
-	const overlapRelPct = overlap > 0 ? Math.min((overlap / chunkSize) * 100, 100) : 0;
+	const overlapRelPct =
+		overlap > 0 ? Math.min((overlap / chunkSize) * 100, 100) : 0;
 	const advancePct = ((chunkSize - overlap) / visualTotal) * 100;
-
 
 	return (
 		<main className="grow flex flex-col md:flex-row h-full w-full max-w-[1920px] mx-auto border-x border-black border-t-0 bg-white">
@@ -107,9 +107,7 @@ export default function PipelineConfig() {
 					<div className="font-mono text-xs uppercase text-black/50 mb-2">
 						Last Modified
 					</div>
-					<div className="font-mono text-sm font-bold">
-						{saveTime}
-					</div>
+					<div className="font-mono text-sm font-bold">{saveTime}</div>
 					<div className="font-mono text-sm font-bold">USER_ID: ADM-092</div>
 				</div>
 			</aside>
@@ -251,7 +249,9 @@ export default function PipelineConfig() {
 									id="chunk-size"
 									type="number"
 									value={chunkSize}
-									onChange={(e) => setChunkSize(parseInt(e.target.value, 10) || 0)}
+									onChange={(e) =>
+										setChunkSize(parseInt(e.target.value, 10) || 0)
+									}
 								/>
 								<span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold transition-colors group-focus-within/input:text-primary">
 									MAX_LIMIT: 8192
@@ -275,10 +275,14 @@ export default function PipelineConfig() {
 									id="overlap"
 									type="number"
 									value={overlap}
-									onChange={(e) => setOverlap(parseInt(e.target.value, 10) || 0)}
+									onChange={(e) =>
+										setOverlap(parseInt(e.target.value, 10) || 0)
+									}
 								/>
 								<span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-mono font-bold transition-colors group-focus-within/input:text-primary">
-									RATIO: {chunkSize > 0 ? ((overlap / chunkSize) * 100).toFixed(1) : 0}%
+									RATIO:{" "}
+									{chunkSize > 0 ? ((overlap / chunkSize) * 100).toFixed(1) : 0}
+									%
 								</span>
 							</div>
 							<p className="text-[10px] font-mono mt-2 uppercase text-black font-bold">

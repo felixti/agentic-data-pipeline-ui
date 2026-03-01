@@ -1,16 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { SearchResult } from "@/app/calibration/components/SearchResultCard";
 
 interface ChunkDetailPanelProps {
-	result: any;
-	strategy: "text" | "hybrid";
+	result: SearchResult;
+	strategy: "text" | "hybrid" | "semantic";
 	query?: string;
 	isOpen: boolean;
 	onClose: () => void;
 }
 
-function getSourceName(result: any): string {
+function getSourceName(result: SearchResult): string {
 	if (result?.content_source_name) return result.content_source_name;
 	const m = result?.metadata;
 	if (!m) return "—";
@@ -24,7 +25,10 @@ function getSourceName(result: any): string {
 	);
 }
 
-function getScore(result: any, strategy: "text" | "hybrid"): number | null {
+function getScore(
+	result: any,
+	strategy: "text" | "hybrid" | "semantic",
+): number | null {
 	if (strategy === "hybrid") {
 		return result.hybrid_score ?? result.score ?? null;
 	}
@@ -34,7 +38,7 @@ function getScore(result: any, strategy: "text" | "hybrid"): number | null {
 export default function ChunkDetailPanel({
 	result,
 	strategy,
-	query,
+	// query,
 	isOpen,
 	onClose,
 }: ChunkDetailPanelProps) {
@@ -95,7 +99,9 @@ export default function ChunkDetailPanel({
 						/>
 						{strategy === "text"
 							? "TEXT (BM25)"
-							: "HYBRID"}
+							: strategy === "semantic"
+								? "SEMANTIC"
+								: "HYBRID"}
 						{rank != null && (
 							<span className="font-mono text-white/60 text-xs">
 								RANK #{rank}
@@ -129,7 +135,9 @@ export default function ChunkDetailPanel({
 							<span className="text-[10px] text-muted font-mono uppercase">
 								{strategy === "text"
 									? "SIMILARITY"
-									: "HYBRID SCORE"}
+									: strategy === "semantic"
+										? "SEMANTIC SCORE"
+										: "HYBRID SCORE"}
 							</span>
 						</div>
 
@@ -141,8 +149,7 @@ export default function ChunkDetailPanel({
 										Vector
 									</span>
 									<span className="font-mono text-sm font-bold">
-										{result.vector_score?.toFixed(4) ??
-											"—"}
+										{result.vector_score?.toFixed(4) ?? "—"}
 									</span>
 								</div>
 								<div className="flex flex-col gap-0.5">
@@ -163,27 +170,33 @@ export default function ChunkDetailPanel({
 								</div>
 							</div>
 						)}
+					</div>
 
-						{/* Highlighted / Matched terms (text search) */}
-						{strategy === "text" &&
-							result.matched_terms?.length > 0 && (
-								<div className="mt-3 flex items-center gap-2 flex-wrap">
-									<span className="text-[9px] font-bold uppercase tracking-widest text-muted">
-										Matched:
-									</span>
-									{result.matched_terms.map(
-										(term: string, i: number) => (
+					{/* Highlighted / Matched terms (text search) */}
+					{strategy === "text" && (result.matched_terms?.length ?? 0) > 0 && (
+						<div className="flex border-b border-ink">
+							<div className="w-1/3 bg-surface p-2 text-[10px] font-bold uppercase tracking-widest text-ink/70 border-r border-ink">
+								MATCHED TERMS
+							</div>
+							<div className="w-2/3 p-2 text-xs font-mono break-all py-3">
+								{result.matched_terms && result.matched_terms.length > 0 ? (
+									<div className="flex flex-wrap gap-1">
+										{result.matched_terms.map((term, i) => (
 											<span
-												key={i}
-												className="font-mono text-[10px] bg-ink text-white px-1.5 py-0.5"
+												// biome-ignore lint/suspicious/noArrayIndexKey: term might not be unique
+												key={`${term}-${i}`}
+												className="bg-primary/10 text-primary px-1.5 py-0.5 border border-primary/30"
 											>
 												{term}
 											</span>
-										),
-									)}
-								</div>
-							)}
-					</div>
+										))}
+									</div>
+								) : (
+									"—"
+								)}
+							</div>
+						</div>
+					)}
 
 					{/* Source / Identity */}
 					<div className="px-6 py-4 border-b border-ink">
@@ -215,9 +228,7 @@ export default function ChunkDetailPanel({
 									<div className="text-[9px] font-bold uppercase tracking-widest text-muted">
 										Job ID
 									</div>
-									<div className="font-mono text-[10px] break-all">
-										{jobId}
-									</div>
+									<div className="font-mono text-[10px] break-all">{jobId}</div>
 								</div>
 							</div>
 
@@ -248,11 +259,14 @@ export default function ChunkDetailPanel({
 					{result.highlighted_content && (
 						<div className="px-6 py-4 border-b border-ink">
 							<div className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3 flex items-center gap-2">
-								<span className="material-symbols-outlined text-xs">highlight</span>
+								<span className="material-symbols-outlined text-xs">
+									highlight
+								</span>
 								Highlighted Matches
 							</div>
 							<div
 								className="text-sm leading-relaxed font-display whitespace-pre-wrap break-words bg-white p-4 border-2 border-primary/30 max-h-[300px] overflow-y-auto [&_mark]:bg-primary/20 [&_mark]:text-ink [&_mark]:font-bold [&_mark]:px-0.5 [&_mark]:border-b-2 [&_mark]:border-primary"
+								// biome-ignore lint/security/noDangerouslySetInnerHtml: Trusted HTML from backend highlight
 								dangerouslySetInnerHTML={{ __html: result.highlighted_content }}
 							/>
 						</div>

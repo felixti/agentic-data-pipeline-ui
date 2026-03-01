@@ -1,15 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useConfig } from "@/components/providers/config-provider";
 import {
 	type CreateJobRequest,
 	type IngestUrlRequest,
 	type UploadFilesRequest,
+	type JobDestination,
 	useCreateJob,
 	useIngestUrl,
 	useUploadFiles,
 } from "@/lib/api/hooks";
-import { useConfig } from "@/components/providers/config-provider";
 
 type Tab = "upload" | "url" | "manual";
 
@@ -77,6 +78,17 @@ export default function NewJobPanel({
 	const [advChunkSize, setAdvChunkSize] = useState<string>("");
 	const [advOverlap, setAdvOverlap] = useState<string>("");
 
+	/* ── Destinations State (GraphRAG) ─────────────── */
+	const [enableCognee, setEnableCognee] = useState(false);
+	const [cogneeDataset, setCogneeDataset] = useState("");
+	const [cogneeGraph, setCogneeGraph] = useState("");
+	const [cogneeAutoCognify, setCogneeAutoCognify] = useState(true);
+	const [cogneeEntities, setCogneeEntities] = useState(true);
+	const [cogneeRelations, setCogneeRelations] = useState(true);
+
+	const [enableHipporag, setEnableHipporag] = useState(false);
+	const [hipporagDataset, setHipporagDataset] = useState("");
+
 	/* ── Global Config Context ─────────────────────── */
 	const { strategy, chunkSize, overlap } = useConfig();
 
@@ -129,6 +141,13 @@ export default function NewJobPanel({
 			setAdvStrategy("");
 			setAdvChunkSize("");
 			setAdvOverlap("");
+			setEnableCognee(false);
+			setCogneeDataset("");
+			setCogneeGraph("");
+			setCogneeEntities(true);
+			setCogneeRelations(true);
+			setEnableHipporag(false);
+			setHipporagDataset("");
 			uploadMutation.reset();
 			urlMutation.reset();
 			manualMutation.reset();
@@ -160,11 +179,44 @@ export default function NewJobPanel({
 				const advanced: Record<string, unknown> = {};
 
 				advanced.chunk_strategy = advStrategy || strategy;
-				advanced.chunk_size = advChunkSize ? parseInt(advChunkSize, 10) : chunkSize;
-				advanced.chunk_overlap = advOverlap ? parseInt(advOverlap, 10) : overlap;
+				advanced.chunk_size = advChunkSize
+					? parseInt(advChunkSize, 10)
+					: chunkSize;
+				advanced.chunk_overlap = advOverlap
+					? parseInt(advOverlap, 10)
+					: overlap;
 
 				if (Object.keys(advanced).length === 0 && !base) return undefined;
 				return { ...base, ...advanced };
+			};
+
+			const buildDestinations = (): JobDestination[] | undefined => {
+				const dests: JobDestination[] = [];
+				if (enableCognee) {
+					dests.push({
+						type: "cognee_local",
+						config: {
+							dataset_id: cogneeDataset.trim() || "default",
+							graph_name: cogneeGraph.trim() || "default",
+							auto_cognify: cogneeAutoCognify,
+							extract_entities: cogneeEntities,
+							extract_relationships: cogneeRelations,
+						},
+						enabled: true,
+					});
+				}
+				if (enableHipporag) {
+					dests.push({
+						type: "hipporag",
+						config: {
+							dataset_id: hipporagDataset.trim() || "default",
+						},
+						enabled: true,
+					});
+				}
+				const result = dests.length > 0 ? dests : undefined;
+				console.log("[NewJobPanel] Generated destinations:", result);
+				return result;
 			};
 
 			if (tab === "upload") {
@@ -172,6 +224,7 @@ export default function NewJobPanel({
 				await uploadMutation.mutateAsync({
 					files,
 					priority: uploadPriority,
+					destinations: buildDestinations(),
 					metadata: buildMetadata(),
 				});
 				setSuccessMsg(
@@ -183,6 +236,7 @@ export default function NewJobPanel({
 					url: url.trim(),
 					filename: urlFilename || undefined,
 					priority: urlPriority,
+					destinations: buildDestinations(),
 					metadata: buildMetadata(),
 				});
 				setSuccessMsg("URL ingestion job created");
@@ -205,6 +259,7 @@ export default function NewJobPanel({
 					source_uri: sourceUri.trim(),
 					file_name: manualFilename || undefined,
 					priority: manualPriority,
+					destinations: buildDestinations(),
 					metadata: finalMetadata,
 				});
 				setSuccessMsg("Job created successfully");
@@ -570,6 +625,110 @@ export default function NewJobPanel({
 							</div>
 						</>
 					)}
+					{/* ─── GRAPHRAG DESTINATIONS ─────────────────────── */}
+					<div className="border-t-4 border-ink pt-6 mt-6">
+						<h3 className="font-bold text-xs tracking-widest uppercase mb-4 flex items-center gap-2">
+							<span className="material-symbols-outlined text-sm">hub</span>
+							GraphRAG Destinations
+						</h3>
+
+						<div className="space-y-4">
+							{/* Cognee Card */}
+							<div className={`border-2 transition-colors ${enableCognee ? 'border-primary' : 'border-ink/20 hover:border-ink/50'}`}>
+								<button
+									type="button"
+									onClick={() => setEnableCognee(!enableCognee)}
+									className="w-full flex items-center justify-between p-4 bg-white cursor-pointer"
+								>
+									<div className="flex items-center gap-3">
+										<div className={`w-5 h-5 border-2 flex items-center justify-center ${enableCognee ? 'border-primary bg-primary' : 'border-ink'}`}>
+											{enableCognee && <span className="material-symbols-outlined text-[14px] text-white font-bold">check</span>}
+										</div>
+										<span className="font-bold text-sm tracking-widest uppercase">Cognee (Knowledge Graph)</span>
+									</div>
+								</button>
+								{enableCognee && (
+									<div className="p-4 border-t-2 border-primary bg-surface/30 space-y-4">
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<label className="block text-[10px] font-bold tracking-widest uppercase text-muted mb-2">Dataset ID</label>
+												<input
+													type="text"
+													value={cogneeDataset}
+													onChange={(e) => setCogneeDataset(e.target.value)}
+													placeholder="default"
+													className="w-full border-b border-ink bg-transparent py-2 font-mono text-xs placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors"
+												/>
+											</div>
+											<div>
+												<label className="block text-[10px] font-bold tracking-widest uppercase text-muted mb-2">Graph Name</label>
+												<input
+													type="text"
+													value={cogneeGraph}
+													onChange={(e) => setCogneeGraph(e.target.value)}
+													placeholder="default"
+													className="w-full border-b border-ink bg-transparent py-2 font-mono text-xs placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors"
+												/>
+											</div>
+										</div>
+										<div className="flex gap-4">
+											<label className="flex items-center gap-2 cursor-pointer group">
+												<input type="checkbox" checked={cogneeAutoCognify} onChange={(e) => setCogneeAutoCognify(e.target.checked)} className="sr-only" />
+												<div className={`w-4 h-4 border-2 flex items-center justify-center ${cogneeAutoCognify ? 'border-primary bg-primary' : 'border-ink group-hover:border-primary/50'}`}>
+													{cogneeAutoCognify && <span className="material-symbols-outlined text-[10px] text-white font-bold">check</span>}
+												</div>
+												<span className="text-[10px] font-bold tracking-widest uppercase text-muted">Auto Cognify</span>
+											</label>
+											<label className="flex items-center gap-2 cursor-pointer group">
+												<input type="checkbox" checked={cogneeEntities} onChange={(e) => setCogneeEntities(e.target.checked)} className="sr-only" />
+												<div className={`w-4 h-4 border-2 flex items-center justify-center ${cogneeEntities ? 'border-primary bg-primary' : 'border-ink group-hover:border-primary/50'}`}>
+													{cogneeEntities && <span className="material-symbols-outlined text-[10px] text-white font-bold">check</span>}
+												</div>
+												<span className="text-[10px] font-bold tracking-widest uppercase text-muted">Entities</span>
+											</label>
+											<label className="flex items-center gap-2 cursor-pointer group">
+												<input type="checkbox" checked={cogneeRelations} onChange={(e) => setCogneeRelations(e.target.checked)} className="sr-only" />
+												<div className={`w-4 h-4 border-2 flex items-center justify-center ${cogneeRelations ? 'border-primary bg-primary' : 'border-ink group-hover:border-primary/50'}`}>
+													{cogneeRelations && <span className="material-symbols-outlined text-[10px] text-white font-bold">check</span>}
+												</div>
+												<span className="text-[10px] font-bold tracking-widest uppercase text-muted">Relationships</span>
+											</label>
+										</div>
+									</div>
+								)}
+							</div>
+
+							{/* HippoRAG Card */}
+							<div className={`border-2 transition-colors ${enableHipporag ? 'border-primary' : 'border-ink/20 hover:border-ink/50'}`}>
+								<button
+									type="button"
+									onClick={() => setEnableHipporag(!enableHipporag)}
+									className="w-full flex items-center justify-between p-4 bg-white cursor-pointer"
+								>
+									<div className="flex items-center gap-3">
+										<div className={`w-5 h-5 border-2 flex items-center justify-center ${enableHipporag ? 'border-primary bg-primary' : 'border-ink'}`}>
+											{enableHipporag && <span className="material-symbols-outlined text-[14px] text-white font-bold">check</span>}
+										</div>
+										<span className="font-bold text-sm tracking-widest uppercase">HippoRAG (Multi-hop)</span>
+									</div>
+								</button>
+								{enableHipporag && (
+									<div className="p-4 border-t-2 border-primary bg-surface/30">
+										<div>
+											<label className="block text-[10px] font-bold tracking-widest uppercase text-muted mb-2">Dataset ID</label>
+											<input
+												type="text"
+												value={hipporagDataset}
+												onChange={(e) => setHipporagDataset(e.target.value)}
+												placeholder="default"
+												className="w-full border-b border-ink bg-transparent py-2 font-mono text-xs placeholder:text-muted/50 focus:outline-none focus:border-primary transition-colors"
+											/>
+										</div>
+									</div>
+								)}
+							</div>
+						</div>
+					</div>
 				</div>
 
 				{/* Footer */}
@@ -632,7 +791,8 @@ export default function NewJobPanel({
 									))}
 								</div>
 								<p className="text-[9px] mt-1.5 font-mono text-muted uppercase">
-									Overrides Global Config. Inheriting: <span className="font-bold">{strategy}</span>
+									Overrides Global Config. Inheriting:{" "}
+									<span className="font-bold">{strategy}</span>
 								</p>
 							</div>
 

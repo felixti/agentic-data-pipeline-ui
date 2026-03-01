@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useCallback, useEffect } from "react";
 
 interface DeleteConfirmModalProps {
 	isOpen: boolean;
@@ -51,14 +51,21 @@ export default function DeleteConfirmModal({
 			aria-labelledby="delete-modal-title"
 			className="fixed inset-0 z-50 flex items-center justify-center"
 			onClick={() => !isPending && onClose()}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					if (!isPending) onClose();
+				}
+			}}
+			tabIndex={-1}
 		>
 			{/* Backdrop */}
 			<div className="absolute inset-0 bg-ink/60" />
 
-			{/* Panel */}
 			<div
 				className="relative z-10 w-full max-w-md bg-white border-4 border-ink shadow-[8px_8px_0px_#000] mx-4"
 				onClick={(e) => e.stopPropagation()}
+				onKeyDown={(e) => e.stopPropagation()}
+				role="document"
 			>
 				{/* Header stripe */}
 				<div

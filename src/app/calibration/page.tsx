@@ -3,39 +3,36 @@
 import { useState } from "react";
 import ChunkDetailPanel from "@/components/ChunkDetailPanel";
 import {
+	useCogneeSearch,
+	useHipporagRetrieve,
 	useHybridSearch,
 	useRagQuery,
 	useSemanticTextSearch,
 	useTextSearch,
 } from "@/lib/api/hooks";
 import type { SemanticTextSearchResultItem } from "@/lib/api/search";
+import ClassificationBadge, {
+	type ClassificationType,
+} from "./components/ClassificationBadge";
+import GraphNetworkViewer from "./components/GraphNetworkViewer";
+import MultiHopPathDiagram from "./components/MultiHopPathDiagram";
+import { renderCard, type SearchResult } from "./components/SearchResultCard";
 
 type FusionMethod = "weighted_sum" | "rrf";
 type RagStrategy = "auto" | "fast" | "balanced" | "thorough";
-
-interface SearchResult {
-	chunk_id?: string;
-	id?: string;
-	chunk_index?: number;
-	content?: string;
-	text?: string;
-	highlighted_content?: string;
-	similarity_score?: number;
-	hybrid_score?: number;
-	score?: number;
-	content_source_name?: string;
-	metadata?: {
-		file_name?: string;
-		filename?: string;
-		source?: string;
-		source_file?: string;
-		document_name?: string;
-		page?: number;
-		chunk_index?: number;
-	};
-}
+type ViewMode = "explore" | "compare";
+type ActiveTab = "text" | "hybrid" | "semantic" | "cognee" | "hippo";
 
 export default function Calibration() {
+	/* ── View State ─────────────────────────────────────── */
+	const [viewMode, setViewMode] = useState<ViewMode>("explore");
+	const [activeTab, setActiveTab] = useState<ActiveTab>("hybrid");
+
+	/* ── Compare Mode State ─────────────────────────────── */
+	const [compareCol1, setCompareCol1] = useState<ActiveTab>("text");
+	const [compareCol2, setCompareCol2] = useState<ActiveTab>("hybrid");
+	const [compareCol3, setCompareCol3] = useState<ActiveTab>("semantic");
+
 	/* ── Query ─────────────────────────────────────────── */
 	const [query, setQuery] = useState("");
 
@@ -47,20 +44,32 @@ export default function Calibration() {
 	const [vectorWeight, setVectorWeight] = useState(0.7);
 	const textWeight = Math.round((1 - vectorWeight) * 100) / 100;
 	const [minSimilarity, setMinSimilarity] = useState(0.5);
-	const [fusionMethod, setFusionMethod] = useState<FusionMethod>("weighted_sum");
+	const [fusionMethod, setFusionMethod] =
+		useState<FusionMethod>("weighted_sum");
 
 	const isRrf = fusionMethod === "rrf";
 	const effectiveVW = isRrf ? 0.5 : vectorWeight;
 	const effectiveTW = isRrf ? 0.5 : textWeight;
 
-	const handleVectorChange = (v: number) => setVectorWeight(Math.round(v * 100) / 100);
-	const handleTextChange = (v: number) => setVectorWeight(Math.round((1 - v) * 100) / 100);
+	const handleVectorChange = (v: number) =>
+		setVectorWeight(Math.round(v * 100) / 100);
+	const handleTextChange = (v: number) =>
+		setVectorWeight(Math.round((1 - v) * 100) / 100);
 
 	/* ── Semantic params ───────────────────────────────── */
 	const [enableReranking, setEnableReranking] = useState(true);
 	const [deduplicate, setDeduplicate] = useState(false);
 	const [includeContext, setIncludeContext] = useState(false);
 	const [entityFilter, setEntityFilter] = useState("");
+
+	/* ── Cognee params ─────────────────────────────────── */
+	const [cogneeStrategy, setCogneeStrategy] = useState<
+		"vector" | "graph" | "hybrid"
+	>("hybrid");
+	const [graphDataset, setGraphDataset] = useState("");
+
+	/* ── HippoRAG params ───────────────────────────────── */
+	// HippoRAG no longer requires UI sliders for hops/PPR
 
 	/* ── RAG ───────────────────────────────────────────── */
 	const [ragOpen, setRagOpen] = useState(false);
@@ -69,13 +78,15 @@ export default function Calibration() {
 	/* ── Detail panel ──────────────────────────────────── */
 	const [selectedChunk, setSelectedChunk] = useState<{
 		result: SearchResult;
-		strategy: "text" | "hybrid";
+		strategy: "text" | "hybrid" | "semantic";
 	} | null>(null);
 
 	/* ── Mutations ─────────────────────────────────────── */
 	const textMutation = useTextSearch();
 	const hybridMutation = useHybridSearch();
 	const semanticMutation = useSemanticTextSearch();
+	const cogneeMutation = useCogneeSearch();
+	const hippoMutation = useHipporagRetrieve();
 	const ragMutation = useRagQuery();
 
 	/* ── Handlers ──────────────────────────────────────── */
@@ -111,6 +122,57 @@ export default function Calibration() {
 			min_similarity: minSimilarity,
 			...(filters ? { filters } : {}),
 		});
+
+		if (
+			viewMode === "compare" ||
+			(viewMode === "explore" && activeTab === "cognee")
+		) {
+			cogneeMutation.mutate({
+				query,
+				search_type: cogneeStrategy,
+				top_k: topK,
+				...(graphDataset ? { dataset_id: graphDataset } : {}),
+			});
+		}
+
+		if (
+			viewMode === "compare" ||
+			(viewMode === "explore" && activeTab === "hippo")
+		) {
+			hippoMutation.mutate({
+				queries: [query],
+				num_to_retrieve: topK,
+				...(graphDataset ? { dataset_id: graphDataset } : {}),
+			});
+		}
+	};
+
+	const handlePresetClick = (
+		preset: "fast" | "balanced" | "thorough" | "graphrag",
+	) => {
+		switch (preset) {
+			case "fast":
+				setActiveTab("text");
+				setTopK(10);
+				break;
+			case "balanced":
+				setActiveTab("hybrid");
+				setVectorWeight(0.7);
+				setFusionMethod("weighted_sum");
+				setTopK(25);
+				break;
+			case "thorough":
+				setActiveTab("semantic");
+				setEnableReranking(true);
+				setDeduplicate(true);
+				setIncludeContext(true);
+				setTopK(50);
+				break;
+			case "graphrag":
+				setActiveTab("hippo");
+				setTopK(10);
+				break;
+		}
 	};
 
 	const handleRunRag = () => {
@@ -118,152 +180,201 @@ export default function Calibration() {
 		ragMutation.mutate({ query, strategy: ragStrategy, top_k: 5 });
 	};
 
+	const handleSelectChunk = (
+		r: SearchResult,
+		strategy: "text" | "hybrid" | "semantic",
+	) => {
+		setSelectedChunk({
+			result: strategy === "semantic" ? { ...r, text: r.content } : r,
+			strategy,
+		});
+	};
+
 	/* ── Helpers ───────────────────────────────────────── */
 	const textResults: SearchResult[] =
-		(textMutation.data as { results?: SearchResult[] } | undefined)?.results ?? [];
+		(textMutation.data as { results?: SearchResult[] } | undefined)?.results ??
+		[];
 	const hybridResults: SearchResult[] =
-		(hybridMutation.data as { results?: SearchResult[] } | undefined)?.results ?? [];
+		(hybridMutation.data as { results?: SearchResult[] } | undefined)
+			?.results ?? [];
 	const semanticResults: SemanticTextSearchResultItem[] =
 		semanticMutation.data?.results ?? [];
 
 	const textLatency: number | undefined =
-		(textMutation.data as { search_time_ms?: number; query_time_ms?: number } | undefined)
-			?.search_time_ms ??
-		(textMutation.data as { query_time_ms?: number } | undefined)?.query_time_ms;
+		(
+			textMutation.data as
+				| { search_time_ms?: number; query_time_ms?: number }
+				| undefined
+		)?.search_time_ms ??
+		(textMutation.data as { query_time_ms?: number } | undefined)
+			?.query_time_ms;
 	const hybridLatency: number | undefined =
-		(hybridMutation.data as { search_time_ms?: number; query_time_ms?: number } | undefined)
-			?.search_time_ms ??
-		(hybridMutation.data as { query_time_ms?: number } | undefined)?.query_time_ms;
+		(
+			hybridMutation.data as
+				| { search_time_ms?: number; query_time_ms?: number }
+				| undefined
+		)?.search_time_ms ??
+		(hybridMutation.data as { query_time_ms?: number } | undefined)
+			?.query_time_ms;
 	const semanticLatency = semanticMutation.data?.query_time_ms;
+
+	// Cognee / Hippo results are visualized with special components,
+	// but we still want them to map easily if we fallback to cards.
+	const cogneeResults = (cogneeMutation.data?.results ?? []).map((r) => ({
+		...r,
+		similarity_score: r.score,
+	}));
+
+	const hippoResultsRaw = hippoMutation.data?.results?.[0];
+	const hippoResults = hippoResultsRaw
+		? hippoResultsRaw.passages.map((p, i) => ({
+				chunk_id: `hippo-${i}`,
+				content: p,
+				similarity_score: hippoResultsRaw.scores[i],
+				metadata: { source: hippoResultsRaw.source_documents[i] },
+			}))
+		: [];
+
+	const cogneeLatency = cogneeMutation.data?.query_time_ms;
+	const hippoLatency = hippoMutation.data?.query_time_ms;
+
+	// Mock classification logic for demonstration purposes
+	const getClassification = (): { type: ClassificationType; conf: number } => {
+		const lowerQ = query.toLowerCase();
+		if (!lowerQ) return { type: "unknown", conf: 0 };
+		if (
+			lowerQ.includes("what") ||
+			lowerQ.includes("who") ||
+			lowerQ.includes("when")
+		)
+			return { type: "factual", conf: 0.92 };
+		if (
+			lowerQ.includes("why") ||
+			lowerQ.includes("how") ||
+			lowerQ.includes("compare")
+		)
+			return { type: "analytical", conf: 0.84 };
+		if (lowerQ.length < 15) return { type: "vague", conf: 0.76 };
+		return { type: "unknown", conf: 0 };
+	};
+	const classification = getClassification();
 
 	const isRunning =
 		textMutation.isPending ||
 		hybridMutation.isPending ||
-		semanticMutation.isPending;
+		semanticMutation.isPending ||
+		cogneeMutation.isPending ||
+		hippoMutation.isPending;
 
-	const getScore = (result: SearchResult, strategy: "text" | "hybrid") => {
-		if (strategy === "hybrid") return result.hybrid_score ?? result.score ?? null;
-		return result.similarity_score ?? result.score ?? null;
-	};
+	/* ── Views ─────────────────────────────────────────── */
 
-	const getSourceName = (result: SearchResult) => {
-		if (result?.content_source_name) return result.content_source_name;
-		const m = result?.metadata;
-		if (!m) return null;
-		return (
-			m.file_name ?? m.filename ?? m.source ?? m.source_file ?? m.document_name ?? null
-		);
-	};
+	const renderCompareSelector = (
+		currentVal: ActiveTab,
+		setter: (v: ActiveTab) => void,
+	) => (
+		<div className="absolute top-3 right-4 z-20">
+			<select
+				value={currentVal}
+				onChange={(e) => setter(e.target.value as ActiveTab)}
+				className="bg-surface border border-ink text-[10px] font-bold uppercase tracking-widest px-2 py-1 outline-none focus:border-primary shadow-[2px_2px_0px_#000]"
+			>
+				<option value="text">BM25 Text</option>
+				<option value="hybrid">Hybrid</option>
+				<option value="semantic">Semantic</option>
+				<option value="cognee">Cognee</option>
+				<option value="hippo">HippoRAG</option>
+			</select>
+		</div>
+	);
 
-	/* ── Result card renderer ──────────────────────────── */
-	const renderCard = (
-		result: SearchResult,
-		idx: number,
-		strategy: "text" | "hybrid",
+	const renderResultsColumn = (
+		title: string,
+		subtitle: string,
+		// biome-ignore lint/suspicious/noExplicitAny: Allows multiple types of mutation hooks
+		mutation: any,
+		// biome-ignore lint/suspicious/noExplicitAny: Allows multiple types of results arrays
+		results: any[],
+		strategyType: "text" | "hybrid" | "semantic" | "cognee" | "hippo",
+		latency?: number,
+		bgClass = "bg-white",
 		usePrimaryScore = false,
-	) => {
-		const score = getScore(result, strategy);
-		const source = getSourceName(result);
-		return (
-			<button
-				key={idx}
-				type="button"
-				className={`w-full text-left border border-ink bg-white p-4 flex flex-col gap-3 cursor-pointer hover:border-primary hover:shadow-[2px_2px_0px_#ff4400] transition-all ${idx > 2 && strategy === "text" ? "opacity-50 hover:opacity-100" : ""}`}
-				onClick={() => setSelectedChunk({ result, strategy })}
-			>
-				<div className="flex justify-between items-baseline">
-					<span
-						className={`font-mono text-xs px-1.5 py-0.5 ${usePrimaryScore ? "bg-primary text-white" : "bg-ink text-white"}`}
-					>
-						{score != null ? score.toFixed(3) : "—"}
-					</span>
-					<span className="font-mono text-[9px] text-muted uppercase">
-						ID{" "}
-						{result.chunk_id?.substring(0, 8) ??
-							result.id?.substring(0, 8) ??
-							`#${idx + 1}`}
-					</span>
-				</div>
-				{result.highlighted_content ? (
-					<p
-						className="text-sm leading-snug font-display line-clamp-4 [&_mark]:bg-primary/20 [&_mark]:text-ink [&_mark]:font-bold [&_mark]:px-0.5"
-						dangerouslySetInnerHTML={{ __html: result.highlighted_content }}
+		selector?: React.ReactNode,
+		colKey?: string | number,
+	) => (
+		<div
+			key={colKey}
+			className={`flex-1 flex flex-col min-w-0 border-r border-ink ${bgClass} relative`}
+		>
+			{selector}
+			<div className="p-4 border-b border-ink flex items-center justify-between min-w-0 bg-white sticky top-0 z-10">
+				<div className="flex items-center gap-2 min-w-0">
+					<div
+						className={`size-3 shrink-0 ${strategyType === "semantic" || strategyType === "cognee" || strategyType === "hippo" ? "" : strategyType === "hybrid" ? "border-2 border-ink" : "bg-ink"}`}
+						style={
+							strategyType === "semantic" ||
+							strategyType === "cognee" ||
+							strategyType === "hippo"
+								? { background: "#1a1a2e" }
+								: {}
+						}
 					/>
-				) : (
-					<p className="text-sm leading-snug font-display line-clamp-4">
-						{result.text ?? result.content ?? "—"}
-					</p>
+					<h3 className="font-bold text-[11px] tracking-wide truncate uppercase">
+						{title} <span className="text-muted font-normal">({subtitle})</span>
+					</h3>
+				</div>
+				<span className="font-mono text-xs text-muted tracking-tighter shrink-0 ml-2">
+					{latency != null ? `${Math.round(latency)}ms` : "—"}
+				</span>
+			</div>
+			<div className="flex-1 overflow-y-auto p-5 flex flex-col gap-3">
+				{mutation.isPending && (
+					<div className="flex items-center justify-center py-10 text-muted font-mono uppercase text-xs animate-pulse">
+						Searching...
+					</div>
 				)}
-				<div className="pt-2 border-t border-ink flex justify-between items-center">
-					<div className="flex items-center gap-1.5">
-						<span className="material-symbols-outlined text-[14px]">
-							description
-						</span>
-						<span className="text-[9px] font-bold uppercase tracking-widest">
-							{source ?? "SOURCE"}
-						</span>
+				{mutation.isError && (
+					<div className="text-red-600 font-mono text-xs p-3 border border-red-300">
+						{mutation.error.message}
 					</div>
-					<span className="text-[9px] font-mono">
-						{result.chunk_index != null
-							? `CHUNK ${result.chunk_index}`
-							: result.metadata?.page
-								? `P. ${result.metadata.page}`
-								: ""}
-					</span>
-				</div>
-			</button>
-		);
-	};
-
-	const renderSemanticCard = (result: SemanticTextSearchResultItem, idx: number) => {
-		const source = getSourceName(result as SearchResult);
-		return (
-			<button
-				key={idx}
-				type="button"
-				className="w-full text-left border border-ink bg-white p-4 flex flex-col gap-3 cursor-pointer hover:border-primary hover:shadow-[2px_2px_0px_#ff4400] transition-all"
-				onClick={() =>
-					setSelectedChunk({ result: { ...result, text: result.content }, strategy: "text" })
-				}
-			>
-				<div className="flex justify-between items-baseline">
-					<span className="font-mono text-xs bg-ink text-white px-1.5 py-0.5"
-						style={{ background: "#1a1a2e" }}
-					>
-						{result.similarity_score != null
-							? result.similarity_score.toFixed(3)
-							: "—"}
-					</span>
-					<span className="font-mono text-[9px] text-muted uppercase">
-						RANK {result.rank ?? idx + 1}
-					</span>
-				</div>
-				<p className="text-sm leading-snug font-display line-clamp-4">
-					{result.content ?? "—"}
-				</p>
-				<div className="pt-2 border-t border-ink flex justify-between items-center">
-					<div className="flex items-center gap-1.5">
-						<span className="material-symbols-outlined text-[14px]">
-							description
-						</span>
-						<span className="text-[9px] font-bold uppercase tracking-widest">
-							{source ?? "SOURCE"}
-						</span>
+				)}
+				{!mutation.isPending && !mutation.isError && results.length === 0 && (
+					<div className="flex items-center justify-center py-10 text-muted font-mono uppercase text-xs">
+						Run a query to see results
 					</div>
-					<span className="text-[9px] font-mono">
-						{result.chunk_index != null ? `CHUNK ${result.chunk_index}` : ""}
-					</span>
-				</div>
-			</button>
-		);
-	};
+				)}
+				{strategyType === "cognee" &&
+					results.length > 0 &&
+					!mutation.isPending && (
+						<div className="text-[10px] font-mono p-3 border border-ink border-dashed mb-2 flex items-center justify-center">
+							[Graph View Only in Explore Mode]
+						</div>
+					)}
+				{strategyType === "hippo" &&
+					results.length > 0 &&
+					!mutation.isPending && (
+						<div className="text-[10px] font-mono p-3 border border-ink border-dashed mb-2 flex items-center justify-center">
+							[Multi-Hop Diagram Only in Explore Mode]
+						</div>
+					)}
+				{results.map((result, idx) =>
+					renderCard(
+						result,
+						idx,
+						strategyType as "text" | "hybrid" | "semantic", // Type cast for card rendering assuming same shape
+						handleSelectChunk,
+						usePrimaryScore,
+					),
+				)}
+			</div>
+		</div>
+	);
 
 	return (
 		<main className="flex flex-1 overflow-hidden">
 			{/* ── Sidebar ─────────────────────────────────── */}
 			<aside className="w-[260px] min-w-[260px] flex flex-col border-r border-ink bg-white h-full overflow-y-auto">
 				<div className="p-5 border-b border-ink">
-					<h1 className="text-xl font-black tracking-tight leading-none mb-0.5">
+					<h1 className="text-xl font-black tracking-tight leading-none mb-0.5 uppercase">
 						CALIBRATION
 					</h1>
 					<p className="text-xs text-muted font-mono uppercase tracking-wide">
@@ -271,12 +382,107 @@ export default function Calibration() {
 					</p>
 				</div>
 
+				{/* View Toggle */}
+				<div className="p-4 border-b border-ink">
+					<div className="flex border border-ink bg-surface p-1">
+						<button
+							type="button"
+							onClick={() => setViewMode("explore")}
+							className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all ${
+								viewMode === "explore"
+									? "bg-white text-ink shadow-[2px_2px_0px_#000] border border-ink"
+									: "text-muted hover:text-ink hover:bg-white/50 border border-transparent"
+							}`}
+						>
+							Explore
+						</button>
+						<button
+							type="button"
+							onClick={() => setViewMode("compare")}
+							className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all ${
+								viewMode === "compare"
+									? "bg-white text-ink shadow-[2px_2px_0px_#000] border border-ink"
+									: "text-muted hover:text-ink hover:bg-white/50 border border-transparent"
+							}`}
+						>
+							Compare
+						</button>
+					</div>
+				</div>
+
+				{/* Presets (Explore mode only) */}
+				{viewMode === "explore" && (
+					<div className="p-4 border-b border-ink bg-surface/30">
+						<div className="text-[10px] font-bold uppercase tracking-widest text-ink mb-3">
+							Quick Presets
+						</div>
+						<div className="grid grid-cols-2 gap-2">
+							<button
+								type="button"
+								onClick={() => handlePresetClick("fast")}
+								className="text-left px-2 py-1.5 border border-ink hover:bg-ink hover:text-white transition-colors group relative overflow-hidden"
+							>
+								<div className="text-[10px] font-bold uppercase tracking-wide">
+									Fast
+								</div>
+								<div className="text-[9px] font-mono text-ink/60 group-hover:text-white/70">
+									BM25 / Top 10
+								</div>
+							</button>
+							<button
+								type="button"
+								onClick={() => handlePresetClick("balanced")}
+								className="text-left px-2 py-1.5 border border-ink hover:bg-ink hover:text-white transition-colors group relative overflow-hidden"
+							>
+								<div className="text-[10px] font-bold uppercase tracking-wide">
+									Balanced
+								</div>
+								<div className="text-[9px] font-mono text-ink/60 group-hover:text-white/70">
+									Hybrid / Top 25
+								</div>
+							</button>
+							<button
+								type="button"
+								onClick={() => handlePresetClick("thorough")}
+								className="text-left px-2 py-1.5 border border-ink hover:bg-ink hover:text-white transition-colors group relative overflow-hidden"
+							>
+								<div className="text-[10px] font-bold uppercase tracking-wide">
+									Thorough
+								</div>
+								<div className="text-[9px] font-mono text-ink/60 group-hover:text-white/70">
+									Rank / Dedup / Context
+								</div>
+							</button>
+							<button
+								type="button"
+								onClick={() => handlePresetClick("graphrag")}
+								className="text-left px-2 py-1.5 border border-ink bg-orange-50 hover:bg-[#FF3300] hover:border-[#FF3300] hover:text-white transition-colors group relative overflow-hidden"
+							>
+								<div className="text-[10px] font-bold uppercase tracking-wide">
+									GraphRAG
+								</div>
+								<div className="text-[9px] font-mono text-ink/60 group-hover:text-white/70">
+									Hippo 3-Hop
+								</div>
+							</button>
+						</div>
+					</div>
+				)}
+
 				<div className="flex-1 flex flex-col p-5 gap-6 overflow-y-auto">
 					{/* Query */}
 					<div className="flex flex-col gap-2">
-						<div className="text-xs font-bold uppercase tracking-wide text-ink flex justify-between">
-							Search Query
-							<span className="text-primary font-mono tracking-tighter">REQ</span>
+						<div className="flex justify-between items-center">
+							<div className="text-xs font-bold uppercase tracking-wide text-ink flex gap-2 items-center">
+								Search Query
+								<span className="text-primary font-mono tracking-tighter">
+									REQ
+								</span>
+							</div>
+							<ClassificationBadge
+								type={classification.type}
+								confidence={classification.conf}
+							/>
 						</div>
 						<textarea
 							className="w-full h-24 p-3 text-sm font-medium bg-white border border-ink focus:border-primary focus:ring-0 resize-none placeholder-muted font-display"
@@ -321,156 +527,403 @@ export default function Calibration() {
 						/>
 					</div>
 
-					{/* Hybrid section */}
-					<div className="flex flex-col gap-4 pt-4 border-t border-ink border-dashed">
-						<div className="text-[9px] font-bold uppercase tracking-widest text-muted">
-							Strategy B · Hybrid
-						</div>
-
-						{/* Vector Weight */}
-						<div className={`flex flex-col gap-1.5 ${isRrf ? "opacity-40" : ""}`}>
-							<div className="flex justify-between items-baseline">
-								<div className="text-xs font-bold uppercase">Vector Weight</div>
-								<span className="font-mono text-primary font-bold tracking-tighter text-sm">
-									{effectiveVW.toFixed(2)}
-								</span>
-							</div>
-							<input
-								max="1"
-								min="0"
-								step="0.05"
-								type="range"
-								value={effectiveVW}
-								disabled={isRrf}
-								onChange={(e) => handleVectorChange(Number(e.target.value))}
-							/>
-						</div>
-
-						{/* Text Weight */}
-						<div className={`flex flex-col gap-1.5 ${isRrf ? "opacity-40" : ""}`}>
-							<div className="flex justify-between items-baseline">
-								<div className="text-xs font-bold uppercase">Text Weight</div>
-								<span className="font-mono text-primary font-bold tracking-tighter text-sm">
-									{effectiveTW.toFixed(2)}
-								</span>
-							</div>
-							<input
-								max="1"
-								min="0"
-								step="0.05"
-								type="range"
-								value={effectiveTW}
-								disabled={isRrf}
-								onChange={(e) => handleTextChange(Number(e.target.value))}
-							/>
-							{isRrf && (
-								<div className="text-[9px] font-mono text-muted text-center">
-									RRF uses fixed 0.50 / 0.50
+					{/* View dependent parameters */}
+					{viewMode === "compare" ? (
+						<>
+							{/* Hybrid section */}
+							<div className="flex flex-col gap-4 pt-4 border-t border-ink border-dashed">
+								<div className="text-[9px] font-bold uppercase tracking-widest text-muted">
+									Strategy B · Hybrid
 								</div>
-							)}
-							{!isRrf && (
-								<div className="text-[9px] font-mono text-muted text-center">
-									Σ = {(effectiveVW + effectiveTW).toFixed(2)}
+
+								{/* Vector Weight */}
+								<div
+									className={`flex flex-col gap-1.5 ${isRrf ? "opacity-40" : ""}`}
+								>
+									<div className="flex justify-between items-baseline">
+										<div className="text-xs font-bold uppercase">
+											Vector Weight
+										</div>
+										<span className="font-mono text-primary font-bold tracking-tighter text-sm">
+											{effectiveVW.toFixed(2)}
+										</span>
+									</div>
+									<input
+										max="1"
+										min="0"
+										step="0.05"
+										type="range"
+										value={effectiveVW}
+										disabled={isRrf}
+										onChange={(e) => handleVectorChange(Number(e.target.value))}
+									/>
 								</div>
+
+								{/* Text Weight */}
+								<div
+									className={`flex flex-col gap-1.5 ${isRrf ? "opacity-40" : ""}`}
+								>
+									<div className="flex justify-between items-baseline">
+										<div className="text-xs font-bold uppercase">
+											Text Weight
+										</div>
+										<span className="font-mono text-primary font-bold tracking-tighter text-sm">
+											{effectiveTW.toFixed(2)}
+										</span>
+									</div>
+									<input
+										max="1"
+										min="0"
+										step="0.05"
+										type="range"
+										value={effectiveTW}
+										disabled={isRrf}
+										onChange={(e) => handleTextChange(Number(e.target.value))}
+									/>
+									{isRrf && (
+										<div className="text-[9px] font-mono text-muted text-center">
+											RRF uses fixed 0.50 / 0.50
+										</div>
+									)}
+									{!isRrf && (
+										<div className="text-[9px] font-mono text-muted text-center">
+											Σ = {(effectiveVW + effectiveTW).toFixed(2)}
+										</div>
+									)}
+								</div>
+
+								{/* Min Similarity */}
+								<div className="flex flex-col gap-2">
+									<div className="flex justify-between items-baseline">
+										<div className="text-xs font-bold uppercase">
+											Min Similarity
+										</div>
+										<span className="font-mono text-primary font-bold tracking-tighter text-sm">
+											{minSimilarity.toFixed(2)}
+										</span>
+									</div>
+									<input
+										max="1"
+										min="0"
+										step="0.05"
+										type="range"
+										value={minSimilarity}
+										onChange={(e) => setMinSimilarity(Number(e.target.value))}
+									/>
+								</div>
+
+								{/* Fusion Method */}
+								<div className="flex flex-col gap-2">
+									<div className="text-xs font-bold uppercase">
+										Fusion Method
+									</div>
+									<div className="flex border border-ink">
+										<button
+											type="button"
+											className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide transition-colors ${fusionMethod === "weighted_sum" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
+											onClick={() => setFusionMethod("weighted_sum")}
+										>
+											Weighted Sum
+										</button>
+										<button
+											type="button"
+											className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-ink transition-colors ${fusionMethod === "rrf" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
+											onClick={() => setFusionMethod("rrf")}
+										>
+											RRF
+										</button>
+									</div>
+								</div>
+							</div>
+
+							{/* Semantic section */}
+							<div className="flex flex-col gap-3 pt-4 border-t border-ink border-dashed">
+								<div className="text-[9px] font-bold uppercase tracking-widest text-muted">
+									Strategy C · Semantic
+								</div>
+
+								<label className="flex items-center gap-3 cursor-pointer group">
+									<input
+										checked={enableReranking}
+										className="swiss-checkbox"
+										type="checkbox"
+										onChange={(e) => setEnableReranking(e.target.checked)}
+									/>
+									<span className="text-xs font-medium group-hover:text-primary transition-colors">
+										Rerank Results
+									</span>
+								</label>
+
+								<label className="flex items-center gap-3 cursor-pointer group">
+									<input
+										checked={deduplicate}
+										className="swiss-checkbox"
+										type="checkbox"
+										onChange={(e) => setDeduplicate(e.target.checked)}
+									/>
+									<span className="text-xs font-medium group-hover:text-primary transition-colors">
+										Deduplicate
+									</span>
+								</label>
+
+								<label className="flex items-center gap-3 cursor-pointer group">
+									<input
+										checked={includeContext}
+										className="swiss-checkbox"
+										type="checkbox"
+										onChange={(e) => setIncludeContext(e.target.checked)}
+									/>
+									<span className="text-xs font-medium group-hover:text-primary transition-colors">
+										Include Context Chunks
+									</span>
+								</label>
+
+								<div className="flex flex-col gap-1.5">
+									<div className="text-xs font-bold uppercase">
+										Entity Filter
+									</div>
+									<input
+										className="w-full p-2 text-xs font-mono bg-white border border-ink focus:border-primary focus:ring-0 placeholder-muted"
+										placeholder="e.g. Microsoft..."
+										value={entityFilter}
+										onChange={(e) => setEntityFilter(e.target.value)}
+									/>
+								</div>
+							</div>
+						</>
+					) : (
+						<div className="flex flex-col gap-4 pt-4 border-t border-ink border-dashed text-sm text-ink/70">
+							{activeTab === "text" && (
+								<p>
+									Basic BM25 Text Search configuration. Only standard Top K
+									configuration applies.
+								</p>
+							)}
+							{activeTab === "hybrid" && (
+								<>
+									{/* Copy Hybrid Configuration here */}
+									{/* Min Similarity */}
+									<div className="flex flex-col gap-2">
+										<div className="flex justify-between items-baseline">
+											<div className="text-xs font-bold uppercase">
+												Min Similarity
+											</div>
+											<span className="font-mono text-primary font-bold tracking-tighter text-sm">
+												{minSimilarity.toFixed(2)}
+											</span>
+										</div>
+										<input
+											max="1"
+											min="0"
+											step="0.05"
+											type="range"
+											value={minSimilarity}
+											onChange={(e) => setMinSimilarity(Number(e.target.value))}
+										/>
+									</div>
+
+									{/* Fusion Method */}
+									<div className="flex flex-col gap-2">
+										<div className="text-xs font-bold uppercase">
+											Fusion Method
+										</div>
+										<div className="flex border border-ink">
+											<button
+												type="button"
+												className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide transition-colors ${fusionMethod === "weighted_sum" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
+												onClick={() => setFusionMethod("weighted_sum")}
+											>
+												Weighted Sum
+											</button>
+											<button
+												type="button"
+												className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-ink transition-colors ${fusionMethod === "rrf" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
+												onClick={() => setFusionMethod("rrf")}
+											>
+												RRF
+											</button>
+										</div>
+									</div>
+									{/* Vector and Text Weights */}
+									<div
+										className={`flex flex-col gap-1.5 ${isRrf ? "opacity-40" : ""}`}
+									>
+										<div className="flex justify-between items-baseline">
+											<div className="text-xs font-bold uppercase">
+												Vector Weight
+											</div>
+											<span className="font-mono text-primary font-bold tracking-tighter text-sm">
+												{effectiveVW.toFixed(2)}
+											</span>
+										</div>
+										<input
+											max="1"
+											min="0"
+											step="0.05"
+											type="range"
+											value={effectiveVW}
+											disabled={isRrf}
+											onChange={(e) =>
+												handleVectorChange(Number(e.target.value))
+											}
+										/>
+									</div>
+									<div
+										className={`flex flex-col gap-1.5 ${isRrf ? "opacity-40" : ""}`}
+									>
+										<div className="flex justify-between items-baseline">
+											<div className="text-xs font-bold uppercase">
+												Text Weight
+											</div>
+											<span className="font-mono text-primary font-bold tracking-tighter text-sm">
+												{effectiveTW.toFixed(2)}
+											</span>
+										</div>
+										<input
+											max="1"
+											min="0"
+											step="0.05"
+											type="range"
+											value={effectiveTW}
+											disabled={isRrf}
+											onChange={(e) => handleTextChange(Number(e.target.value))}
+										/>
+										{isRrf && (
+											<div className="text-[9px] font-mono text-muted text-center">
+												RRF uses fixed 0.50 / 0.50
+											</div>
+										)}
+										{!isRrf && (
+											<div className="text-[9px] font-mono text-muted text-center">
+												Σ = {(effectiveVW + effectiveTW).toFixed(2)}
+											</div>
+										)}
+									</div>
+								</>
+							)}
+							{activeTab === "semantic" && (
+								<>
+									<label className="flex items-center gap-3 cursor-pointer group">
+										<input
+											checked={enableReranking}
+											className="swiss-checkbox"
+											type="checkbox"
+											onChange={(e) => setEnableReranking(e.target.checked)}
+										/>
+										<span className="text-xs font-medium group-hover:text-primary transition-colors">
+											Rerank Results
+										</span>
+									</label>
+
+									<label className="flex items-center gap-3 cursor-pointer group">
+										<input
+											checked={deduplicate}
+											className="swiss-checkbox"
+											type="checkbox"
+											onChange={(e) => setDeduplicate(e.target.checked)}
+										/>
+										<span className="text-xs font-medium group-hover:text-primary transition-colors">
+											Deduplicate
+										</span>
+									</label>
+
+									<label className="flex items-center gap-3 cursor-pointer group">
+										<input
+											checked={includeContext}
+											className="swiss-checkbox"
+											type="checkbox"
+											onChange={(e) => setIncludeContext(e.target.checked)}
+										/>
+										<span className="text-xs font-medium group-hover:text-primary transition-colors">
+											Include Context Chunks
+										</span>
+									</label>
+
+									<div className="flex flex-col gap-1.5">
+										<div className="text-xs font-bold uppercase">
+											Entity Filter
+										</div>
+										<input
+											className="w-full p-2 text-xs font-mono bg-white border border-ink focus:border-primary focus:ring-0 placeholder-muted"
+											placeholder="e.g. Microsoft..."
+											value={entityFilter}
+											onChange={(e) => setEntityFilter(e.target.value)}
+										/>
+									</div>
+								</>
+							)}
+							{activeTab === "cognee" && (
+								<>
+									<div className="flex flex-col gap-2">
+										<div className="text-xs font-bold uppercase">Strategy</div>
+										<div className="flex border border-ink">
+											<button
+												type="button"
+												className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide transition-colors ${cogneeStrategy === "vector" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
+												onClick={() => setCogneeStrategy("vector")}
+											>
+												Vector
+											</button>
+											<button
+												type="button"
+												className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-ink transition-colors ${cogneeStrategy === "graph" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
+												onClick={() => setCogneeStrategy("graph")}
+											>
+												Graph
+											</button>
+											<button
+												type="button"
+												className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-ink transition-colors ${cogneeStrategy === "hybrid" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
+												onClick={() => setCogneeStrategy("hybrid")}
+											>
+												Hybrid
+											</button>
+										</div>
+									</div>
+
+									<div className="flex flex-col gap-1.5 pt-2">
+										<div className="text-xs font-bold uppercase">
+											Dataset (Optional)
+										</div>
+										<input
+											className="w-full p-2 text-xs font-mono bg-white border border-ink focus:border-primary focus:ring-0 placeholder-muted"
+											placeholder="Dataset Name..."
+											value={graphDataset}
+											onChange={(e) => setGraphDataset(e.target.value)}
+										/>
+									</div>
+								</>
+							)}
+							{activeTab === "hippo" && (
+								<>
+									<div className="flex flex-col gap-1.5 pb-4">
+										<div className="text-xs font-bold uppercase">
+											Dataset (Optional)
+										</div>
+										<input
+											className="w-full p-2 text-xs font-mono bg-white border border-ink focus:border-primary focus:ring-0 placeholder-muted"
+											placeholder="Dataset Name..."
+											value={graphDataset}
+											onChange={(e) => setGraphDataset(e.target.value)}
+										/>
+									</div>
+									<div className="text-xs text-ink/70 pt-4 border-t border-ink border-dashed">
+										<p>
+											HippoRAG automatically determines the optimal multi-hop
+											paths.
+										</p>
+										<p className="mt-2 text-[10px] uppercase tracking-wide font-bold">
+											No Manual Tuning Required
+										</p>
+									</div>
+								</>
 							)}
 						</div>
-
-						{/* Min Similarity */}
-						<div className="flex flex-col gap-2">
-							<div className="flex justify-between items-baseline">
-								<div className="text-xs font-bold uppercase">Min Similarity</div>
-								<span className="font-mono text-primary font-bold tracking-tighter text-sm">
-									{minSimilarity.toFixed(2)}
-								</span>
-							</div>
-							<input
-								max="1"
-								min="0"
-								step="0.05"
-								type="range"
-								value={minSimilarity}
-								onChange={(e) => setMinSimilarity(Number(e.target.value))}
-							/>
-						</div>
-
-						{/* Fusion Method */}
-						<div className="flex flex-col gap-2">
-							<div className="text-xs font-bold uppercase">Fusion Method</div>
-							<div className="flex border border-ink">
-								<button
-									type="button"
-									className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide transition-colors ${fusionMethod === "weighted_sum" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
-									onClick={() => setFusionMethod("weighted_sum")}
-								>
-									Weighted Sum
-								</button>
-								<button
-									type="button"
-									className={`flex-1 py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-ink transition-colors ${fusionMethod === "rrf" ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
-									onClick={() => setFusionMethod("rrf")}
-								>
-									RRF
-								</button>
-							</div>
-						</div>
-					</div>
-
-					{/* Semantic section */}
-					<div className="flex flex-col gap-3 pt-4 border-t border-ink border-dashed">
-						<div className="text-[9px] font-bold uppercase tracking-widest text-muted">
-							Strategy C · Semantic
-						</div>
-
-						<label className="flex items-center gap-3 cursor-pointer group">
-							<input
-								checked={enableReranking}
-								className="swiss-checkbox"
-								type="checkbox"
-								onChange={(e) => setEnableReranking(e.target.checked)}
-							/>
-							<span className="text-xs font-medium group-hover:text-primary transition-colors">
-								Rerank Results
-							</span>
-						</label>
-
-						<label className="flex items-center gap-3 cursor-pointer group">
-							<input
-								checked={deduplicate}
-								className="swiss-checkbox"
-								type="checkbox"
-								onChange={(e) => setDeduplicate(e.target.checked)}
-							/>
-							<span className="text-xs font-medium group-hover:text-primary transition-colors">
-								Deduplicate
-							</span>
-						</label>
-
-						<label className="flex items-center gap-3 cursor-pointer group">
-							<input
-								checked={includeContext}
-								className="swiss-checkbox"
-								type="checkbox"
-								onChange={(e) => setIncludeContext(e.target.checked)}
-							/>
-							<span className="text-xs font-medium group-hover:text-primary transition-colors">
-								Include Context Chunks
-							</span>
-						</label>
-
-						<div className="flex flex-col gap-1.5">
-							<div className="text-xs font-bold uppercase">Entity Filter</div>
-							<input
-								className="w-full p-2 text-xs font-mono bg-white border border-ink focus:border-primary focus:ring-0 placeholder-muted"
-								placeholder="e.g. Microsoft..."
-								value={entityFilter}
-								onChange={(e) => setEntityFilter(e.target.value)}
-							/>
-						</div>
-					</div>
+					)}
 				</div>
 
 				{/* Run button */}
-				<div className="p-0 mt-auto border-t border-ink bg-white sticky bottom-0">
+				<div className="p-0 mt-auto border-t border-ink bg-white sticky bottom-0 z-20">
 					<button
 						type="button"
 						className="w-full h-12 bg-ink text-white font-bold text-sm hover:bg-primary transition-colors flex items-center justify-center gap-2 uppercase tracking-wide disabled:opacity-50"
@@ -480,135 +933,199 @@ export default function Calibration() {
 						<span className="material-symbols-outlined text-[18px]">
 							{isRunning ? "hourglass_empty" : "play_arrow"}
 						</span>
-						{isRunning ? "Running..." : "Run All Strategies"}
+						{isRunning
+							? "Running..."
+							: viewMode === "compare"
+								? "Run All Strategies"
+								: "Run Query"}
 					</button>
 				</div>
 			</aside>
 
 			{/* ── Main results area ────────────────────────── */}
-			<section className="flex-1 flex flex-col h-full overflow-hidden bg-surface">
-				{/* Column headers */}
-				<div className="flex-none grid grid-cols-3 border-b border-ink bg-white uppercase min-w-0">
-					{/* Strategy A */}
-					<div className="p-4 border-r border-ink flex items-center justify-between min-w-0">
-						<div className="flex items-center gap-2 min-w-0">
-							<div className="size-3 bg-ink shrink-0" />
-							<h3 className="font-bold text-[11px] tracking-wide truncate">
-								A: TEXT (BM25)
-							</h3>
+			<section className="flex-1 flex flex-col h-full overflow-hidden bg-surface relative">
+				{viewMode === "explore" ? (
+					<div className="flex flex-col h-full">
+						{/* Tab Headers */}
+						<div className="flex border-b border-ink bg-white overflow-x-auto">
+							{[
+								{ id: "text", label: "Text (BM25)" },
+								{ id: "hybrid", label: "Hybrid" },
+								{ id: "semantic", label: "Semantic" },
+								{ id: "cognee", label: "Cognee GraphRAG" },
+								{ id: "hippo", label: "HippoRAG" },
+							].map((tab) => (
+								<button
+									key={tab.id}
+									type="button"
+									onClick={() => setActiveTab(tab.id as ActiveTab)}
+									className={`px-6 py-3 border-r border-ink text-xs font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
+										activeTab === tab.id
+											? "bg-ink text-white"
+											: "hover:bg-surface/50 text-ink/70 hover:text-ink cursor-pointer"
+									}`}
+								>
+									{tab.label}
+								</button>
+							))}
 						</div>
-						<span className="font-mono text-xs text-muted tracking-tighter flex-shrink-0 ml-2">
-							{textLatency != null ? `${Math.round(textLatency)}ms` : "—"}
-						</span>
-					</div>
 
-						{/* Strategy B */}
-					<div className="p-4 border-r border-ink flex items-center justify-between min-w-0">
-						<div className="flex items-center gap-2 min-w-0">
-							<div className="size-3 border-2 border-ink shrink-0" />
-							<h3 className="font-bold text-[11px] tracking-wide truncate">
-								B: HYBRID ({isRrf ? "RRF" : `V${effectiveVW}/T${effectiveTW}`})
-							</h3>
+						{/* Tab Content */}
+						<div className="flex-1 flex w-full h-full overflow-hidden relative">
+							{activeTab === "text" &&
+								renderResultsColumn(
+									"Text",
+									"BM25",
+									textMutation,
+									textResults,
+									"text",
+									textLatency,
+									"bg-white",
+									false,
+								)}
+							{activeTab === "hybrid" &&
+								renderResultsColumn(
+									"Hybrid",
+									`${isRrf ? "RRF" : `V${effectiveVW}/T${effectiveTW}`}`,
+									hybridMutation,
+									hybridResults,
+									"hybrid",
+									hybridLatency,
+									"bg-surface/50",
+									true,
+								)}
+							{activeTab === "semantic" &&
+								renderResultsColumn(
+									"Semantic",
+									enableReranking ? "RERANK" : "",
+									semanticMutation,
+									semanticResults,
+									"semantic",
+									semanticLatency,
+									"bg-white",
+									false,
+								)}
+							{(activeTab === "cognee" || activeTab === "hippo") && (
+								<>
+									<div className="flex-1 flex items-center justify-center bg-white border-r border-ink">
+										{activeTab === "cognee" ? (
+											<GraphNetworkViewer
+												isLoading={cogneeMutation.isPending}
+												entities={
+													cogneeMutation.data?.results?.flatMap(
+														(r) => r.entities || [],
+													) || []
+												}
+											/>
+										) : (
+											<MultiHopPathDiagram
+												isLoading={hippoMutation.isPending}
+												entities={
+													hippoMutation.data?.results?.[0]?.entities || []
+												}
+											/>
+										)}
+									</div>
+									{activeTab === "cognee"
+										? renderResultsColumn(
+												"Cognee",
+												cogneeStrategy.toUpperCase(),
+												cogneeMutation,
+												cogneeResults,
+												"cognee",
+												cogneeLatency,
+												"bg-surface/50",
+												false,
+											)
+										: renderResultsColumn(
+												"HippoRAG",
+												"MULTI-HOP",
+												hippoMutation,
+												hippoResults,
+												"hippo",
+												hippoLatency,
+												"bg-surface/50",
+												false,
+											)}
+								</>
+							)}
 						</div>
-						<span className="font-mono text-xs text-muted tracking-tighter shrink-0 ml-2">
-							{hybridLatency != null ? `${Math.round(hybridLatency)}ms` : "—"}
-						</span>
 					</div>
+				) : (
+					/* Compare View (Original 3 columns) */
+					<div className="flex-1 flex flex-col w-full h-full overflow-hidden">
+						<div className="flex-1 grid grid-cols-3 overflow-hidden h-full min-h-0">
+							{[compareCol1, compareCol2, compareCol3].map(
+								(colStrategy, index) => {
+									let title = "";
+									let subtitle = "";
+									// biome-ignore lint/suspicious/noExplicitAny: Allows multiple types of mutation hooks
+									let mutation: any;
+									// biome-ignore lint/suspicious/noExplicitAny: Allows multiple types of results arrays
+									let results: any[] = [];
+									let latency: number | undefined;
+									let usePrimaryScore = false;
 
-					{/* Strategy C */}
-					<div className="p-4 flex items-center justify-between min-w-0">
-						<div className="flex items-center gap-2 min-w-0">
-							<div
-								className="size-3 shrink-0"
-								style={{ background: "#1a1a2e" }}
-							/>
-							<h3 className="font-bold text-[11px] tracking-wide truncate">
-								C: SEMANTIC{enableReranking ? " + RERANK" : ""}
-							</h3>
+									if (colStrategy === "text") {
+										title = "Text";
+										subtitle = "BM25";
+										mutation = textMutation;
+										results = textResults;
+										latency = textLatency;
+									} else if (colStrategy === "hybrid") {
+										title = "Hybrid";
+										subtitle = `${isRrf ? "RRF" : `V${effectiveVW}/T${effectiveTW}`}`;
+										mutation = hybridMutation;
+										results = hybridResults;
+										latency = hybridLatency;
+										usePrimaryScore = true;
+									} else if (colStrategy === "semantic") {
+										title = "Semantic";
+										subtitle = enableReranking ? "RERANK" : "";
+										mutation = semanticMutation;
+										results = semanticResults;
+										latency = semanticLatency;
+									} else if (colStrategy === "cognee") {
+										title = "Cognee";
+										subtitle = cogneeStrategy.toUpperCase();
+										mutation = cogneeMutation;
+										results = cogneeResults;
+										latency = cogneeLatency;
+									} else if (colStrategy === "hippo") {
+										title = "HippoRAG";
+										subtitle = `PPR M-HOP`;
+										mutation = hippoMutation;
+										results = hippoResults;
+										latency = hippoLatency;
+									}
+
+									return renderResultsColumn(
+										title,
+										subtitle,
+										mutation,
+										results,
+										colStrategy,
+										latency,
+										index % 2 === 0 ? "bg-white" : "bg-surface/50",
+										usePrimaryScore,
+										renderCompareSelector(
+											colStrategy,
+											index === 0
+												? setCompareCol1
+												: index === 1
+													? setCompareCol2
+													: setCompareCol3,
+										),
+										`compare-${index}`,
+									);
+								},
+							)}
 						</div>
-						<span className="font-mono text-xs text-muted tracking-tighter flex-shrink-0 ml-2">
-							{semanticLatency != null ? `${Math.round(semanticLatency)}ms` : "—"}
-						</span>
 					</div>
-				</div>
-
-				{/* Results columns */}
-				<div className="flex-1 grid grid-cols-3 overflow-hidden h-full min-h-0">
-					{/* ── Strategy A: Text ─────────────────── */}
-					<div className="border-r border-ink overflow-y-auto bg-white p-5 flex flex-col gap-3">
-						{textMutation.isPending && (
-							<div className="flex items-center justify-center py-10 text-muted font-mono uppercase text-xs animate-pulse">
-								Searching...
-							</div>
-						)}
-						{textMutation.isError && (
-							<div className="text-red-600 font-mono text-xs p-3 border border-red-300">
-								{textMutation.error.message}
-							</div>
-						)}
-						{!textMutation.isPending &&
-							!textMutation.isError &&
-							textResults.length === 0 && (
-								<div className="flex items-center justify-center py-10 text-muted font-mono uppercase text-xs">
-									Run a query to see results
-								</div>
-							)}
-						{textResults.map((result, idx) =>
-							renderCard(result, idx, "text", false),
-						)}
-					</div>
-
-					{/* ── Strategy B: Hybrid ───────────────── */}
-					<div className="border-r border-ink overflow-y-auto bg-surface/50 p-5 flex flex-col gap-3">
-						{hybridMutation.isPending && (
-							<div className="flex items-center justify-center py-10 text-muted font-mono uppercase text-xs animate-pulse">
-								Searching...
-							</div>
-						)}
-						{hybridMutation.isError && (
-							<div className="text-red-600 font-mono text-xs p-3 border border-red-300">
-								{hybridMutation.error.message}
-							</div>
-						)}
-						{!hybridMutation.isPending &&
-							!hybridMutation.isError &&
-							hybridResults.length === 0 && (
-								<div className="flex items-center justify-center py-10 text-muted font-mono uppercase text-xs">
-									Run a query to see results
-								</div>
-							)}
-						{hybridResults.map((result, idx) =>
-							renderCard(result, idx, "hybrid", true),
-						)}
-					</div>
-
-					{/* ── Strategy C: Semantic ─────────────── */}
-					<div className="overflow-y-auto bg-white p-5 flex flex-col gap-3">
-						{semanticMutation.isPending && (
-							<div className="flex items-center justify-center py-10 text-muted font-mono uppercase text-xs animate-pulse">
-								Searching...
-							</div>
-						)}
-						{semanticMutation.isError && (
-							<div className="text-red-600 font-mono text-xs p-3 border border-red-300">
-								{semanticMutation.error.message}
-							</div>
-						)}
-						{!semanticMutation.isPending &&
-							!semanticMutation.isError &&
-							semanticResults.length === 0 && (
-								<div className="flex items-center justify-center py-10 text-muted font-mono uppercase text-xs">
-									Run a query to see results
-								</div>
-							)}
-						{semanticResults.map((result, idx) =>
-							renderSemanticCard(result, idx),
-						)}
-					</div>
-				</div>
+				)}
 
 				{/* ── RAG Query Panel ──────────────────────── */}
-				<div className="flex-none border-t border-ink bg-white">
+				<div className="flex-none border-t border-ink bg-white z-20">
 					<button
 						type="button"
 						className="w-full flex items-center justify-between px-5 py-3 hover:bg-surface/50 transition-colors"
@@ -621,12 +1138,12 @@ export default function Calibration() {
 							<span className="text-xs font-bold uppercase tracking-widest">
 								RAG Mode
 							</span>
-							<span className="text-[9px] font-mono text-muted uppercase border border-ink px-1.5 py-0.5">
+							<span className="text-[9px] font-mono text-muted uppercase border border-ink px-1.5 py-0.5 hidden sm:inline-block">
 								/api/v1/rag/query
 							</span>
 						</div>
 						{ragMutation.data && (
-							<span className="text-[9px] font-mono text-muted">
+							<span className="text-[9px] font-mono text-muted hidden sm:inline-block">
 								{ragMutation.data.strategy_used?.toUpperCase()} ·{" "}
 								{ragMutation.data.metrics?.latency_ms != null
 									? `${Math.round(ragMutation.data.metrics.latency_ms)}ms`
@@ -638,29 +1155,29 @@ export default function Calibration() {
 					{ragOpen && (
 						<div className="border-t border-ink p-5 flex flex-col gap-4">
 							{/* Strategy selector + run */}
-							<div className="flex items-end gap-4">
-								<div className="flex flex-col gap-1.5">
+							<div className="flex items-end gap-4 overflow-x-auto pb-2">
+								<div className="flex flex-col gap-1.5 min-w-max">
 									<div className="text-[9px] font-bold uppercase tracking-widest text-muted">
 										Strategy Preset
 									</div>
 									<div className="flex border border-ink">
-										{(["auto", "fast", "balanced", "thorough"] as RagStrategy[]).map(
-											(s) => (
-												<button
-													key={s}
-													type="button"
-													className={`px-3 py-1.5 text-[9px] font-bold uppercase tracking-wide transition-colors border-r border-ink last:border-r-0 ${ragStrategy === s ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
-													onClick={() => setRagStrategy(s)}
-												>
-													{s}
-												</button>
-											),
-										)}
+										{(
+											["auto", "fast", "balanced", "thorough"] as RagStrategy[]
+										).map((s) => (
+											<button
+												key={s}
+												type="button"
+												className={`px-3 py-1.5 text-[9px] font-bold uppercase tracking-wide transition-colors border-r border-ink last:border-r-0 ${ragStrategy === s ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5"}`}
+												onClick={() => setRagStrategy(s)}
+											>
+												{s}
+											</button>
+										))}
 									</div>
 								</div>
 								<button
 									type="button"
-									className="h-9 px-6 bg-ink text-white font-bold text-xs hover:bg-primary transition-colors flex items-center gap-2 uppercase tracking-wide disabled:opacity-50"
+									className="h-9 px-6 bg-ink text-white font-bold text-xs hover:bg-primary transition-colors flex items-center gap-2 uppercase tracking-wide disabled:opacity-50 shrink-0"
 									disabled={!query.trim() || ragMutation.isPending}
 									onClick={handleRunRag}
 								>
@@ -693,48 +1210,76 @@ export default function Calibration() {
 									{ragMutation.data.metrics && (
 										<div className="flex gap-4 flex-wrap">
 											{[
-												{ label: "Latency", value: `${Math.round(ragMutation.data.metrics.latency_ms)}ms` },
-												{ label: "Tokens", value: ragMutation.data.metrics.tokens_used },
-												{ label: "Retrieval Score", value: ragMutation.data.metrics.retrieval_score?.toFixed(3) },
-												{ label: "Chunks Used", value: `${ragMutation.data.metrics.chunks_used}/${ragMutation.data.metrics.chunks_retrieved}` },
+												{
+													label: "Latency",
+													value: `${Math.round(ragMutation.data.metrics.latency_ms)}ms`,
+												},
+												{
+													label: "Tokens",
+													value: ragMutation.data.metrics.tokens_used,
+												},
+												{
+													label: "Retrieval Score",
+													value:
+														ragMutation.data.metrics.retrieval_score?.toFixed(
+															3,
+														),
+												},
+												{
+													label: "Chunks Used",
+													value: `${ragMutation.data.metrics.chunks_used}/${ragMutation.data.metrics.chunks_retrieved}`,
+												},
 											].map(({ label, value }) => (
-												<div key={label} className="flex flex-col border-l-2 border-ink pl-2">
-													<span className="text-[8px] text-muted font-mono uppercase">{label}</span>
-													<span className="font-bold font-mono text-xs">{value}</span>
+												<div
+													key={label}
+													className="flex flex-col border-l-2 border-ink pl-2"
+												>
+													<span className="text-[8px] text-muted font-mono uppercase">
+														{label}
+													</span>
+													<span className="font-bold font-mono text-xs">
+														{value}
+													</span>
 												</div>
 											))}
 											{ragMutation.data.query_type && (
 												<div className="flex flex-col border-l-2 border-ink pl-2">
-													<span className="text-[8px] text-muted font-mono uppercase">Query Type</span>
-													<span className="font-bold font-mono text-xs uppercase">{ragMutation.data.query_type}</span>
+													<span className="text-[8px] text-muted font-mono uppercase">
+														Query Type
+													</span>
+													<span className="font-bold font-mono text-xs uppercase">
+														{ragMutation.data.query_type}
+													</span>
 												</div>
 											)}
 										</div>
 									)}
 
 									{/* Sources */}
-									{ragMutation.data.sources && ragMutation.data.sources.length > 0 && (
-										<div className="flex flex-col gap-2">
-											<div className="text-[9px] font-bold uppercase tracking-widest text-muted">
-												Sources ({ragMutation.data.sources.length})
+									{ragMutation.data.sources &&
+										ragMutation.data.sources.length > 0 && (
+											<div className="flex flex-col gap-2">
+												<div className="text-[9px] font-bold uppercase tracking-widest text-muted">
+													Sources ({ragMutation.data.sources.length})
+												</div>
+												<div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-2">
+													{ragMutation.data.sources.map((src, i) => (
+														<div
+															key={src.chunk_id ?? `rag-src-${i}`}
+															className="flex gap-3 items-start p-2 border border-ink/30 bg-surface/20"
+														>
+															<span className="font-mono text-[9px] bg-ink text-white px-1 py-0.5 shrink-0">
+																{src.similarity_score?.toFixed(3) ??
+																	`#${i + 1}`}
+															</span>
+															<p className="text-xs text-muted leading-snug line-clamp-2 font-display">
+																{src.content}
+															</p>
+														</div>
+													))}
+												</div>
 											</div>
-											<div className="flex flex-col gap-2 max-h-40 overflow-y-auto">
-												{ragMutation.data.sources.map((src, i) => (
-													<div
-														key={src.chunk_id ?? `rag-src-${i}`}
-														className="flex gap-3 items-start p-2 border border-ink/30 bg-surface/20"
-													>
-														<span className="font-mono text-[9px] bg-ink text-white px-1 py-0.5 shrink-0">
-															{src.similarity_score?.toFixed(3) ?? `#${i + 1}`}
-														</span>
-														<p className="text-xs text-muted leading-snug line-clamp-2 font-display">
-															{src.content}
-														</p>
-													</div>
-												))}
-											</div>
-										</div>
-									)}
+										)}
 								</div>
 							)}
 						</div>
@@ -743,13 +1288,21 @@ export default function Calibration() {
 			</section>
 
 			{/* Chunk Detail Panel */}
-			<ChunkDetailPanel
-				result={selectedChunk?.result}
-				strategy={selectedChunk?.strategy ?? "text"}
-				query={query}
-				isOpen={selectedChunk != null}
-				onClose={() => setSelectedChunk(null)}
-			/>
+			{selectedChunk && (
+				<ChunkDetailPanel
+					result={selectedChunk.result}
+					strategy={
+						selectedChunk.strategy === "text" ||
+						selectedChunk.strategy === "hybrid" ||
+						selectedChunk.strategy === "semantic"
+							? selectedChunk.strategy
+							: "hybrid" // fallback
+					}
+					query={query}
+					isOpen={selectedChunk != null}
+					onClose={() => setSelectedChunk(null)}
+				/>
+			)}
 		</main>
 	);
 }
